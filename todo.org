@@ -1,0 +1,14 @@
+#+TODO: TODO INPROGRESS | DONE
+#+STARTUP: indent
+* core logic [25%]
+** INPROGRESS Data model
+** DONE Build system
+** INPROGRESS Framework
+** INPROGRESS Semanticization
+* importer [50%]
+** DONE JSON
+** TODO Plantuml
+* exporter [0%]
+** INPROGRESS Python
+** TODO JSON
+** TODO Plantuml

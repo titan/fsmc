@@ -1,0 +1,77 @@
+#+STARTUP: indent
+
+* Data Model
+#+begin_src python :tangle ${BUILDDIR}/model.py
+  from typing import List, NewType
+
+
+  class Parameter:
+    name: str
+    type: str
+    default: str
+
+    def __init__(self):
+      self.name = None
+      self.type = None
+      self.default = None
+
+    def __str__(self):
+      if self.default:
+        return '%s: %s = %s' % (self.name, self.type, self.default)
+      else:
+        return '%s: %s' % (self.name, self.type)
+
+    def __repr__(self):
+      return self.__str__()
+
+
+  class Event:
+    name: str
+    parameters: List[Parameter]
+
+    def __init__(self):
+      self.name = None
+      self.parameters = []
+
+
+  State = NewType('State', object)
+  Transaction = NewType('Transaction', object)
+
+  class State:
+    name: str
+    transactions: List[Transaction]
+    substates = List[State]
+
+    def __init__(self):
+      self.name = None
+      self.transactions = []
+      self.substates = []
+
+
+  class Action:
+    name: str
+    arguments: List[Parameter]
+
+    def __init__(self):
+      self.name = None
+      self.arguments = []
+
+    def __str__(self):
+      return '%s(%s)' % (self.name, ', '.join([str(x) for x in self.arguments]))
+
+    def __repr__(self):
+      return self.__str__()
+
+
+  class Transaction:
+    event: Event
+    guard: str
+    actions: List[Action]
+    target: State
+
+    def __init__(self):
+      self.event = None
+      self.guard = None
+      self.actions = []
+      self.target = None
+#+end_src

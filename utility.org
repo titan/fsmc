@@ -1,0 +1,54 @@
+#+STARTUP: indent
+* Utility
+** framework
+#+begin_src python :tangle ${BUILDDIR}/utility.py
+  <<normalize>>
+#+end_src
+** normalize
+#+begin_src python :noweb-ref normalize
+  def normalize(string):
+    mappings = {}
+    mappings['_'] = '_UNDERLINE_'
+    mappings['!='] = '_NOT_EQUALS_'
+    mappings[':='] = '_ASSIGN_TO_'
+    mappings['=='] = '_EQUALS_'
+    mappings['='] = '_EQUALS_'
+    mappings['+'] = '_PLUS_'
+    mappings['-'] = '_MINUS_'
+    mappings['>'] = '_GREATER_THAN_'
+    mappings['<'] = '_LESS_THAN_'
+    mappings['('] = '_OPEN_PARENTHESIS_'
+    mappings[')'] = '_CLOSE_PARENTHESIS_'
+    mappings['['] = '_OPEN_BRACKET_'
+    mappings[']'] = '_CLOSE_BRACKET_'
+    mappings['{'] = '_OPEN_BRACE_'
+    mappings['}'] = '_CLOSE_BRACE_'
+    mappings[':'] = '_COLON_'
+    mappings[','] = '_COMMA_'
+    mappings[';'] = '_SEMI_COLON_'
+    mappings['"'] = '_DOUBLE_QUOTES_'
+    mappings["'"] = '_APOSTROPHE_'
+    mappings['.'] = '_DOT_'
+    mappings['?'] = '_QUESTION_'
+    mappings['%'] = '_PERCENT_'
+    mappings[' '] = '_'
+    mappings['\n'] = '_NEWLINE_'
+    mappings['#'] = '_SHARP_'
+    mappings['*'] = '_ASTERISK_'
+    mappings['\\'] = '_BACKSLASH_'
+    mappings['|'] = '_PIPE_'
+    mappings['!'] = '_EXCLAM_'
+    mappings['/'] = '_SLASH_'
+    for (k, v) in mappings.items():
+      string = string.replace(k, v)
+
+    result = string.replace(' ', '_').replace('__', '_').replace('__', '_').upper()
+
+    if result.startswith('_'):
+      result = result[1:]
+    if result.endswith('_'):
+      result = result[:-1]
+    if result[0].isdigit():
+      result = "NUMBER_" + result
+    return result
+#+end_src

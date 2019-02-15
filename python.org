@@ -1,0 +1,152 @@
+#+STARTUP: indent
+* Python
+** framework
+#+begin_src python :tangle ${BUILDDIR}/python.py
+  from typing import List, Mapping
+  from model import Action, Event, Parameter, State, Transaction
+  from utility import normalize
+
+  <<exporter>>
+
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<save-states>>
+  <<save-delegate>>
+  <<save-state-machine>>
+  def save(dst: str, states: List[State]):
+    if dst.endswith('python'):
+      dst = dst[:-4]
+    with open(dst, 'w') as f:
+      f.write('from abc import ABC, abstractmethod\n\n')
+      f.write(__save_states(states))
+      f.write(__save_delegate(states))
+      f.write(__save_state_machine(states))
+#+end_src
+*** states
+#+begin_src python :noweb-ref save-states
+  def __save_states(states: List[State]) -> str:
+    code = 'class State:\n'
+    i: int = 0
+    for state in states:
+      code += '%s%s = %d\n' % (' ' * 2, normalize(state.name), i)
+      i += 1
+    return code + '\n\n'
+#+end_src
+*** delegate
+#+begin_src python :noweb-ref save-delegate
+  def __save_delegate(states: List[State]) -> str:
+    actions = {}
+    for state in states:
+      for transaction in state.transactions:
+        for action in transaction.actions:
+          actions[action.name] = action
+    code = 'class StateMachineDelegate(ABC):\n\n'
+    for action in actions.values():
+      code += ' ' * 2 + '@abstractmethod\n'
+      code += ' ' * 2 + 'def %s(%s):\n' % (action.name, ', '.join(['ctx'] + [x.name.lower() for x in action.arguments]))
+      code += ' ' * 4 + 'return NotImplemented\n\n'
+    return code + '\n'
+#+end_src
+*** state machine
+#+begin_src python :noweb-ref save-state-machine
+  def __save_state_machine(states: List[State]) -> str:
+    events = {}
+    extended_events = {}
+    targettable = {}
+    eventimpl = ''
+    for state in states:
+      for transaction in state.transactions:
+        event = transaction.event
+        if event not in events:
+          events[event] = [transaction]
+        else:
+          events[event].append(transaction)
+    for (event, transactions) in events.items():
+      guardmappings = {}
+      for transaction in transactions:
+        if transaction.guard:
+          guardmappings[transaction.guard] = transaction
+      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (event.name.lower(), ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+      if len(guardmappings) > 0:
+        guards = [x for x in guardmappings.keys()]
+        for i in range(len(guards)):
+          guard = guards[i]
+          transaction = guardmappings[guard]
+          eventimpl += ' ' * 4 + ('el' if i != 0 else '') + 'if %s:\n' % guard
+          event_tag = (event.name + '_' + normalize(guard)).upper()
+          eventimpl += ' ' * 6 + 'if self.__transactions_action[self.state][%s]:\n' % event_tag
+          eventimpl += ' ' * 8 + 'self.__transactions_action[self.state][%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+          eventimpl += ' ' * 6 + 'self.state = __transactions_target[self.state][%s]\n' % event_tag
+          extended_events[event_tag] = None
+      else:
+        event_tag = event.name.upper()
+        eventimpl += ' ' * 4 + 'if self.__transactions_action[self.state][%s]:\n' % event_tag
+        eventimpl += ' ' * 6 + 'self.__transactions_action[self.state][%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+        eventimpl += ' ' * 4 + 'self.state = __transactions_target[self.state][%s]\n' % event_tag
+        extended_events[event_tag] = None
+      eventimpl += '\n'
+    eventdef = ''
+    eventidx = 0
+    for tag in extended_events.keys():
+      eventdef += '%s%s = %d\n' % (' ' * 2, tag, eventidx)
+      eventidx += 1
+    targetstable = []
+    actionstable = []
+    for state in states:
+      targets = []
+      actions = []
+      for tag in extended_events.keys():
+        found = False
+        for transaction in state.transactions:
+          if transaction.guard:
+            event_tag = (transaction.event.name + '_' + normalize(transaction.guard)).upper()
+          else:
+            event_tag = transaction.event.name.upper()
+          if tag == event_tag and transaction.target:
+            target = transaction.target
+            if len(transaction.actions) == 0:
+              action = 'None'
+            elif len(transaction.actions) == 1:
+              action = 'self.delegate.%s' % transaction.actions[0].name
+            else:
+              action = ('self.__%s_%s_action' % (normalize(state.name), tag)).lower()
+            found = True
+            break
+        if not found:
+          target = state
+          action = 'None'
+        targets.append(target)
+        actions.append(action)
+      targetstable.append('[%s]' % ', '.join(['State.' + normalize(x.name) for x in targets]))
+      actionstable.append('[%s]' % ', '.join(actions))
+    actionimpl = ''
+    for state in states:
+      for transaction in state.transactions:
+        if len(transaction.actions) > 1:
+          if transaction.guard:
+            event_tag = (transaction.event.name + '_' + normalize(transaction.guard)).lower()
+          else:
+            event_tag = transaction.event.name.lower()
+          actionimpl += ' ' * 2 + 'def __%s_%s_action(self, %s):\n' % (normalize(state.name).lower(), event_tag, ', '.join(['ctx'] + [x.name.lower() for x in transaction.event.parameters]))
+          for action in transaction.actions:
+            actionimpl += ' ' * 6 + 'self.delegate.%s(%s)\n' % (action.name, ', '.join(['ctx'] + [x.name for x in action.arguments]))
+          actionimpl += '\n'
+    code = '__transactions_target = [%s]\n\n' % (', '.join(targetstable))
+    code += 'class StateMachine:\n'
+    code += eventdef + '\n'
+    code += ' ' * 2 + 'def __init__(self, delegate):\n'
+    code += ' ' * 4 + 'self.state = State.%s\n' % normalize(states[0].name)
+    code += ' ' * 4 + 'self.delegate = delegate\n'
+    code += ' ' * 4 + 'self.__transactions_target = [%s]\n' % ', '.join(actionstable)
+    code += '\n'
+    return code + eventimpl + actionimpl
+#+end_src
+
+| variable        | type                              | note                  |
+|-----------------+-----------------------------------+-----------------------|
+| events          | Mapping[Event, List[Transaction]] |                       |
+| extended_events | Mapping[str, Transaction]         | key is event + guards |
+| guardmappings   | Mapping[str, Transaction]         | key is guard          |
+| targettable     | Mapping[Event, str]               |                       |

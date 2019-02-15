@@ -1,0 +1,97 @@
+#+TITLE: The Finite State Machine Converter
+#+AUTHOR: Titan
+#+EMAIL: howay.tan@gmail.com
+#+DATE: <2019-02-13 Wed>
+#+KEYWORDS: fsm finite-state-machine converter
+#+OPTIONS: H:4 toc:t
+#+STARTUP: indent
+#+SUBTITLE: A tool to convert finite state machine from one format to another
+#+titlepage: true
+#+titlepage-color: 06386e
+#+titlepage-text-color: FFFFFF
+#+titlepage-rule-color: FFFFFF
+#+titlepage-rule-height: 1
+
+* Core Logic
+** Framework
+#+begin_src python :tangle ${BUILDDIR}/fsmc.py
+  from model import Action, Event, State, Transaction
+  import jsonio
+  import python
+
+  importers = {
+    'json': jsonio.load,
+  }
+
+  exporters = {
+    'py': python.save,
+    'python': python.save,
+  }
+
+  def main(args):
+    import os
+    <<extract-arguments>>
+    states = importers[fronn](input)
+    exporters[to](output, states)
+
+  if __name__ == '__main__':
+    import argparse
+    import sys
+    parser = argparse.ArgumentParser()
+    <<argument-definations>>
+    args = parser.parse_args()
+    main(args)
+#+end_src
+** Command Line Arguments
+| argument | type   | usage                                                                   |
+|----------+--------+-------------------------------------------------------------------------|
+| --from   | string | specify the current from of the filename from which should be converted |
+| --to     | string | specify the format to which the filename should be converted            |
+| --output | string | specify the filename to save converted result                           |
+| input    | string | specify the filename to be converted                                    |
+
+#+begin_src python :noweb-ref argument-definations
+  parser.add_argument('-f', '--from', dest='fronn', help='specify the current from of the filename from which should be converted')
+  parser.add_argument('-t', '--to', help='specify the format to which the filename should be converted')
+  parser.add_argument('-o', '--output', help='specify the filename to save converted result')
+  parser.add_argument('input', help='specify the filename to be converted')
+#+end_src
+*** Extract arguments
+#+begin_src python :noweb-ref extract-arguments
+  fronn = args.fronn
+  to = args.to
+  output = args.output
+  input = args.input
+
+  if not to and not output:
+    print('Missing --to or --output')
+    exit(1)
+  elif not to:
+    (_, ext) = os.path.splitext(output)
+    if not ext or ext[1:] not in exporters:
+      print('Unsupported converted file extension: %s' % (ext if ext else ''))
+      exit(1)
+    else:
+      to = ext[1:]
+  elif not output:
+    if to not in exporters:
+      print('Unsupported converted file format: %s' % to)
+      exit(1)
+    (path, _) = os.path.splitext(input)
+    output = path + '.' + to
+  else:
+    if to not in exporters:
+      print('Unsupported converted file format: %s' % to)
+      exit(1)
+
+  if fronn:
+    if fronn not in importers:
+      print('Unsupported converting file format: %s' % fronn)
+  else:
+    (_, ext) = os.path.splitext(input)
+    if not ext or ext[1:] not in importers:
+      print('Unsupported converting file extension: %s' % (ext if ext else ''))
+      exit(1)
+    else:
+      fronn = ext[1:]
+#+end_src
