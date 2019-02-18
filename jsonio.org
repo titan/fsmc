@@ -52,7 +52,7 @@
           },
           {
             "event": "input",
-            "guard": "ch == ' '",
+            "guard": "ch == ' ' or ch == '\\t'",
             "target": "# space"
           },
           {
@@ -75,7 +75,7 @@
           },
           {
             "event": "input",
-            "guard": "ch == ' '",
+            "guard": "ch == ' ' or ch == '\\t'",
             "target": "# # space"
           },
           {
@@ -98,7 +98,7 @@
           },
           {
             "event": "input",
-            "guard": "ch == ' '",
+            "guard": "ch == ' ' or ch == '\\t'",
             "target": "# # # space"
           },
           {
@@ -116,7 +116,7 @@
         "transactions": [
           {
             "event": "input",
-            "guard": "ch == ' '",
+            "guard": "ch == ' ' or ch == '\\t'",
             "target": "init"
           },
           {
@@ -207,7 +207,7 @@
         "transactions": [
           {
             "event": "input",
-            "guard": "ch == ' '",
+            "guard": "ch == ' ' or ch == '\\t'",
             "action": "add_to_buffer(ch)"
           },
           {
@@ -232,7 +232,7 @@
         "transactions": [
           {
             "event": "input",
-            "guard": "ch == ' '",
+            "guard": "ch == ' ' or ch == '\\t'",
             "action": "add_to_buffer(ch)"
           },
           {
@@ -346,7 +346,7 @@
         elif k == 'guard':
           transaction.guard = v
         elif k == 'action':
-          actions = v.split(';')
+          actions = v.split('\n')
           for act in actions:
             action = Action()
             matched = re.search('(.*)\((.*)\)', act)

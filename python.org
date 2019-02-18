@@ -45,7 +45,7 @@
     code = 'class StateMachineDelegate(ABC):\n\n'
     for action in actions.values():
       code += ' ' * 2 + '@abstractmethod\n'
-      code += ' ' * 2 + 'def %s(%s):\n' % (action.name, ', '.join(['ctx'] + [x.name.lower() for x in action.arguments]))
+      code += ' ' * 2 + 'def %s(self, %s):\n' % (action.name, ', '.join(['ctx'] + [x.name.lower() for x in action.arguments]))
       code += ' ' * 4 + 'return NotImplemented\n\n'
     return code + '\n'
 #+end_src
@@ -98,24 +98,29 @@
       targets = []
       actions = []
       for tag in extended_events.keys():
-        found = False
+        found_target = False
+        found_action = False
         for transaction in state.transactions:
           if transaction.guard:
             event_tag = (transaction.event.name + '_' + normalize(transaction.guard)).upper()
           else:
             event_tag = transaction.event.name.upper()
-          if tag == event_tag and transaction.target:
-            target = transaction.target
+          if tag == event_tag:
+            if transaction.target:
+              target = transaction.target
+              found_target = True
             if len(transaction.actions) == 0:
               action = 'None'
-            elif len(transaction.actions) == 1:
+              found_action = True
+            elif len(transaction.actions) == 1 and len(transaction.actions[0].arguments) == len(transaction.event.parameters):
               action = 'self.delegate.%s' % transaction.actions[0].name
+              found_action = True
             else:
               action = ('self._%s_%s_action' % (normalize(state.name), tag)).lower()
-            found = True
-            break
-        if not found:
+              found_action = True
+        if not found_target:
           target = state
+        if not found_action:
           action = 'None'
         targets.append(target)
         actions.append(action)
@@ -124,7 +129,11 @@
     actionimpl = ''
     for state in states:
       for transaction in state.transactions:
-        if len(transaction.actions) > 1:
+        if len(transaction.actions) == 0:
+          continue
+        elif len(transaction.actions) == 1 and len(transaction.actions[0].arguments) == len(transaction.event.parameters):
+          continue
+        else:
           if transaction.guard:
             event_tag = (transaction.event.name + '_' + normalize(transaction.guard)).lower()
           else:
@@ -139,7 +148,7 @@
     code += ' ' * 2 + 'def __init__(self, delegate):\n'
     code += ' ' * 4 + 'self.state = State.%s\n' % normalize(states[0].name)
     code += ' ' * 4 + 'self.delegate = delegate\n'
-    code += ' ' * 4 + 'self._transactions_target = [%s]\n' % ', '.join(actionstable)
+    code += ' ' * 4 + 'self._transactions_action = [%s]\n' % ', '.join(actionstable)
     code += '\n'
     return code + eventimpl + actionimpl
 #+end_src
