@@ -262,15 +262,15 @@
   def load(src: str) -> List[Event]:
     with open(src, 'r') as f:
       data = json.loads(f.read())
-      events = __parse_events(data['events'])
-      states = __parse_states(data['states'], events)
+      events = _parse_events(data['events'])
+      states = _parse_states(data['states'], events)
       return states
 #+end_src
 *** parse events
 #+begin_src python :noweb-ref parse-events
   <<verify-parameter>>
   <<verify-event>>
-  def __parse_events(data: Mapping[str, str]) -> List[Event]:
+  def _parse_events(data: Mapping[str, str]) -> List[Event]:
     events = []
     for e in data:
       event = Event()
@@ -287,13 +287,13 @@
                 parameter.type = vv
               elif kk == 'default':
                 parameter.default = vv
-            event.parameters.append(__verify_parameter(parameter, p))
-      events.append(__verify_event(event, e))
+            event.parameters.append(_verify_parameter(parameter, p))
+      events.append(_verify_event(event, e))
     return events
 #+end_src
 **** verify-parameter
 #+begin_src python :noweb-ref verify-parameter
-  def __verify_parameter(p: Parameter, d: Mapping[str, str]) -> Parameter:
+  def _verify_parameter(p: Parameter, d: Mapping[str, str]) -> Parameter:
     if not p.name:
       print('Missing name in parameter: %s' % json.dumps(d))
       exit(1)
@@ -304,7 +304,7 @@
 #+end_src
 **** verify-event
 #+begin_src python :noweb-ref verify-event
-  def __verify_event(e: Event, d: Mapping[str, str]) -> Event:
+  def _verify_event(e: Event, d: Mapping[str, str]) -> Event:
     if not e.name:
       print('Missing name in event: %s' % json.dumps(d))
       exit(1)
@@ -315,7 +315,7 @@
 #+begin_src python :noweb-ref parse-states
   <<parse-transactions>>
   <<verify-transaction>>
-  def __parse_states(data: Mapping[str, str], events: List[Event]) -> List[State]:
+  def _parse_states(data: Mapping[str, str], events: List[Event]) -> List[State]:
     states = []
     for s in data:
       state = State()
@@ -323,26 +323,26 @@
         if k == 'name':
           state.name = v
         elif k == 'transactions':
-          state.transactions = __parse_transactions(v, events)
+          state.transactions = _parse_transactions(v, events)
         elif k == 'states':
-          state.substates = __parse_states(v)
+          state.substates = _parse_states(v)
       states.append(state)
     for state in states:
       for t in state.transactions:
-        __verify_transaction(t, states, events)
+        _verify_transaction(t, states, events)
     return states
 #+end_src
 *** parse transactions
 #+begin_src python :noweb-ref parse-transactions
-  def __parse_transactions(data: Mapping[str, str], events: List[Event]) -> List[Transaction]:
+  def _parse_transactions(data: Mapping[str, str], events: List[Event]) -> List[Transaction]:
     transactions = []
     for t in data:
       transaction = Transaction()
-      transaction.__eventstr = None
-      transaction.__targetstr = None
+      transaction._eventstr = None
+      transaction._targetstr = None
       for (k, v) in t.items():
         if k == 'event':
-          transaction.__eventstr = v
+          transaction._eventstr = v
         elif k == 'guard':
           transaction.guard = v
         elif k == 'action':
@@ -352,40 +352,40 @@
             matched = re.search('(.*)\((.*)\)', act)
             if matched:
               action.name = matched[1]
-              action.__argumentstrs = [x.strip() for x in matched[2].split(',')]
+              action._argumentstrs = [x.strip() for x in matched[2].split(',')]
             else:
               action.name = act
-              action.__argumentstrs = None
+              action._argumentstrs = None
             transaction.actions.append(action)
         elif k == 'target':
-          transaction.__targetstr = v
+          transaction._targetstr = v
       transactions.append(transaction)
     return transactions
 #+end_src
 **** verify transaction
 #+begin_src python :noweb-ref verify-transaction
-  def __verify_transaction(t: Transaction, states: List[State], events: List[Event]):
-    if t.__eventstr:
+  def _verify_transaction(t: Transaction, states: List[State], events: List[Event]):
+    if t._eventstr:
       for event in events:
-        if event.name == t.__eventstr:
+        if event.name == t._eventstr:
           t.event = event
           break
       if not t.event:
-        print('Undefined event: %s' % t.__eventstr)
+        print('Undefined event: %s' % t._eventstr)
         exit(1)
-    if t.__targetstr:
+    if t._targetstr:
       for state in states:
-        if t.__targetstr == state.name:
+        if t._targetstr == state.name:
           t.target = state
           break
       if not t.target:
-        print('Undefined target: %s' % t.__targetstr)
+        print('Undefined target: %s' % t._targetstr)
         exit(1)
     if len(t.actions) > 0:
       for action in t.actions:
-        if action.__argumentstrs:
+        if action._argumentstrs:
           args = []
-          for arg in action.__argumentstrs:
+          for arg in action._argumentstrs:
             found: bool = False
             for param in t.event.parameters:
               if arg == param.name:
