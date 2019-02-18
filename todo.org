@@ -5,10 +5,11 @@
 ** DONE Build system
 ** INPROGRESS Framework
 ** INPROGRESS Semanticization
-* importer [50%]
+* importer [33%]
 ** DONE JSON
 ** TODO Plantuml
-* exporter [0%]
-** INPROGRESS Python
-** TODO JSON
+** INPROGRESS Excel
+* exporter [66%]
+** DONE Python
+** DONE JSON
 ** TODO Plantuml

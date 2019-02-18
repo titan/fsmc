@@ -26,6 +26,7 @@
   exporters = {
     'py': python.save,
     'python': python.save,
+    'json': jsonio.save,
   }
 
   def main(args):

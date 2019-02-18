@@ -8,6 +8,7 @@
   import re
 
   <<importer>>
+  <<exporter>>
 #+end_src
 ** importer
 *** example
@@ -396,4 +397,49 @@
               print('Undefined action arguments "%s" in action: %s' % (arg, action))
               exit(1)
           action.arguments = args
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<json-encoder>>
+  def save(dst: str, states: List[State]):
+    events = {}
+    for state in states:
+      for transaction in state.transactions:
+        events[transaction.event] = None
+    data = {'events': [x for x in events.keys()], 'states': states}
+    with open(dst, 'w') as f:
+      f.write(json.dumps(data, cls=ModelJSONEncoder, indent=2))
+#+end_src
+*** JSON Encoder
+#+begin_src python :noweb-ref json-encoder
+  class ModelJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+      if isinstance(obj, Event):
+        return { 'name': obj.name, 'parameters': obj.parameters }
+      if isinstance(obj, Parameter):
+        return { 'name': obj.name, 'type': obj.type, 'default': obj.default }
+      if isinstance(obj, State):
+        return { 'name': obj.name, 'transactions': obj.transactions }
+      if isinstance(obj, Action):
+        return { 'name': obj.name, 'arguments': obj.arguments }
+      if isinstance(obj, Transaction):
+        data = {}
+        if len(obj.actions) > 0:
+          actions = []
+          for action in obj.actions:
+            if len(action.arguments) > 0:
+              actions.append('%s(%s)' % (action.name, ', '.join([x.name for x in action.arguments])))
+            else:
+              actions.append(action.name)
+          data['action'] = '\n'.join(actions)
+        if obj.event:
+          data['event'] = obj.event.name
+        if obj.guard:
+          data['guard'] = obj.guard
+        if obj.target:
+          data['target'] = obj.target.name
+        return data
+      # Let the base class default method raise the TypeError
+      return json.JSONEncoder.default(self, obj)
 #+end_src
