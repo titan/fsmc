@@ -76,15 +76,15 @@
           transaction = guardmappings[guard]
           eventimpl += ' ' * 4 + ('el' if i != 0 else '') + 'if %s:\n' % guard
           event_tag = (event.name + '_' + normalize(guard)).upper()
-          eventimpl += ' ' * 6 + 'if self._transactions_action[self.state][%s]:\n' % event_tag
-          eventimpl += ' ' * 8 + 'self._transactions_action[self.state][%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
-          eventimpl += ' ' * 6 + 'self.state = _transactions_target[self.state][%s]\n' % event_tag
+          eventimpl += ' ' * 6 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
+          eventimpl += ' ' * 8 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+          eventimpl += ' ' * 6 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
           extended_events[event_tag] = None
       else:
         event_tag = event.name.upper()
-        eventimpl += ' ' * 4 + 'if self._transactions_action[self.state][%s]:\n' % event_tag
-        eventimpl += ' ' * 6 + 'self._transactions_action[self.state][%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
-        eventimpl += ' ' * 4 + 'self.state = _transactions_target[self.state][%s]\n' % event_tag
+        eventimpl += ' ' * 4 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
+        eventimpl += ' ' * 6 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+        eventimpl += ' ' * 4 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
         extended_events[event_tag] = None
       eventimpl += '\n'
     eventdef = ''
