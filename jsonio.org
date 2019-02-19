@@ -416,13 +416,22 @@
   class ModelJSONEncoder(json.JSONEncoder):
     def default(self, obj):
       if isinstance(obj, Event):
-        return { 'name': obj.name, 'parameters': obj.parameters }
+        data = { 'name': obj.name }
+        if len(obj.parameters) > 0:
+          data['parameters'] = obj.parameters
+        return data
       if isinstance(obj, Parameter):
-        return { 'name': obj.name, 'type': obj.type, 'default': obj.default }
+        data = { 'name': obj.name, 'type': obj.type }
+        if obj.default:
+          data['default'] = obj.default
+        return data
       if isinstance(obj, State):
         return { 'name': obj.name, 'transactions': obj.transactions }
       if isinstance(obj, Action):
-        return { 'name': obj.name, 'arguments': obj.arguments }
+        data = { 'name': obj.name }
+        if obj.arguments:
+          data['arguments'] = obj.arguments
+        return data
       if isinstance(obj, Transaction):
         data = {}
         if len(obj.actions) > 0:
@@ -430,9 +439,10 @@
           for action in obj.actions:
             if len(action.arguments) > 0:
               actions.append('%s(%s)' % (action.name, ', '.join([x.name for x in action.arguments])))
-            else:
+            elif len(action.name) > 0:
               actions.append(action.name)
-          data['action'] = '\n'.join(actions)
+          if len(actions) > 0:
+            data['action'] = '\n'.join(actions)
         if obj.event:
           data['event'] = obj.event.name
         if obj.guard:
