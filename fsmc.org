@@ -18,9 +18,13 @@
   from model import Action, Event, State, Transaction
   import jsonio
   import python
+  import excel
 
   importers = {
     'json': jsonio.load,
+    'excel': excel.load,
+    'xls': excel.load,
+    'xlsx': excel.load,
   }
 
   exporters = {

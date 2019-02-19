@@ -1,0 +1,159 @@
+#+STARTUP: indent
+* Excel
+** framework
+#+begin_src python :tangle ${BUILDDIR}/excel.py
+  from typing import List, Mapping, Tuple
+  from model import Action, Event, Parameter, State, Transaction
+  import re
+
+  <<importer>>
+#+end_src
+** importer
+*** basic
+#+begin_src python :noweb-ref importer
+  <<parse-events>>
+  <<parse-states>>
+
+  def load(src: str) -> List[Event]:
+    from openpyxl import load_workbook
+    wb = load_workbook(src, read_only = True)
+    wx = wb[wb.sheetnames[0]]
+    events = _parse_events(wx)
+    states = _parse_states(wx, events)
+    wb.close()
+    return states
+#+end_src
+
+*** parse events
+#+begin_src python :noweb-ref parse-events
+  <<verify-parameter>>
+  <<verify-event>>
+  def _parse_events(wx) -> List[Tuple[Event, str]]:
+    events = []
+    headers = wx[1]
+    for i in range(1, len(headers)):
+      header = headers[i]
+      event = Event()
+      guard = None
+      parameters = []
+      result = re.search('(.*)\((.*)\)\[(.*)\]', header.value)
+      if result:
+        event.name = result.group(1).strip()
+        parameters = result.group(2).split(',')
+        guard = result.group(3).strip()
+      else:
+        result = re.search('(.*)\((.*)\)', header.value)
+        if result:
+          event.name = result.group(1).strip()
+          parameters = result.group(2).split(',')
+        else:
+          event.name = header.value.strip()
+      for parameter in parameters:
+        param = Parameter()
+        param_matched = re.search('(.*):(.*)=(.*)', parameter)
+        if param_matched:
+          param.name = param_matched.group(1).strip()
+          param.type = param_matched.group(2).strip()
+          param.default = param_matched.group(3).strip()
+          event.parameters.append(_verify_parameter(param, header))
+          continue
+        param_matched = re.search('(.*):(.*)', parameter)
+        if param_matched:
+          param.name = param_matched.group(1).strip()
+          param.type = param_matched.group(2).strip()
+          event.parameters.append(_verify_parameter(param, header))
+          continue
+        event.parameters.append(_verify_parameter(param, header))
+      events.append((_verify_event(event, header), guard))
+    return events
+#+end_src
+**** verify-parameter
+#+begin_src python :noweb-ref verify-parameter
+  def _verify_parameter(p: Parameter, d) -> Parameter:
+    if not p.name:
+      print('Missing name in parameter: %s' % d)
+      exit(1)
+    if not p.type:
+      print('Missing type in parameter: %s' % d)
+      exit(1)
+    return p
+#+end_src
+**** verify-event
+#+begin_src python :noweb-ref verify-event
+  def _verify_event(e: Event, d) -> Event:
+    if not e.name:
+      print('Missing name in event: %s' % d)
+      exit(1)
+    else:
+      return e
+#+end_src
+*** parse states
+#+begin_src python :noweb-ref parse-states
+  <<verify-transaction>>
+  def _parse_states(wx, headers: List[Tuple[Event, str]]) -> List[State]:
+    states = []
+    for i in range(2, wx.max_row + 1):
+      row = wx[i]
+      state = State()
+      if row[0].value.count('.') != 0:
+        continue
+      state.name = row[0].value
+      for j in range(1, len(row)):
+        transaction = Transaction()
+        transaction._targetstr = None
+        cell = row[j]
+        if cell.value:
+          transaction.event = headers[j - 1][0]
+          transaction.guard = headers[j - 1][1]
+          lines = cell.value.split('\n')
+          state_mode = False
+          for line in lines:
+            if line == '----':
+              state_mode = True
+              continue
+            if not state_mode:
+              action = Action()
+              matched = re.search('(.*)\((.*)\)', line)
+              if matched:
+                action.name = matched[1]
+                action._argumentstrs = [x.strip() for x in matched[2].split(',')]
+              else:
+                action.name = line
+                action._argumentstrs = None
+              transaction.actions.append(action)
+            else:
+              transaction._targetstr = line
+          state.transactions.append(transaction)
+      states.append(state)
+    for state in states:
+      for t in state.transactions:
+        _verify_transaction(t, states)
+    return states
+#+end_src
+**** verify transaction
+#+begin_src python :noweb-ref verify-transaction
+  def _verify_transaction(t: Transaction, states: List[State]):
+    if t._targetstr:
+      for state in states:
+        if t._targetstr == state.name:
+          t.target = state
+          break
+      if not t.target:
+        print('Undefined target: %s' % t._targetstr)
+        exit(1)
+    if len(t.actions) > 0:
+      for action in t.actions:
+        if action._argumentstrs:
+          args = []
+          for arg in action._argumentstrs:
+            found: bool = False
+            for param in t.event.parameters:
+              if arg == param.name:
+                args.append(param)
+                found = True
+                break
+            if not found:
+              print('Undefined action arguments "%s" in action: %s' % (arg, action))
+              exit(1)
+          action.arguments = args
+#+end_src
