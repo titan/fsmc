@@ -48,8 +48,10 @@
           actions[action.name] = action
     code = 'class StateMachineDelegate(ABC):\n\n'
     for action in actions.values():
+      if len(action.name) == 0:
+        continue
       code += ' ' * 2 + '@abstractmethod\n'
-      code += ' ' * 2 + 'def %s(self, %s):\n' % (action.name, ', '.join(['ctx'] + [x.name.lower() for x in action.arguments]))
+      code += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(action.name).lower(), ', '.join(['ctx'] + [x.name.lower() for x in action.arguments]))
       code += ' ' * 4 + 'return NotImplemented\n\n'
     return code + '\n'
 #+end_src
@@ -72,20 +74,20 @@
       for transaction in transactions:
         if transaction.guard:
           guardmappings[transaction.guard] = transaction
-      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (event.name.lower(), ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(event.name).lower(), ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
       if len(guardmappings) > 0:
         guards = [x for x in guardmappings.keys()]
         for i in range(len(guards)):
           guard = guards[i]
           transaction = guardmappings[guard]
           eventimpl += ' ' * 4 + ('el' if i != 0 else '') + 'if %s:\n' % guard
-          event_tag = (event.name + '_' + normalize(guard)).upper()
+          event_tag = normalize(event.name) + '_' + normalize(guard)
           eventimpl += ' ' * 6 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
           eventimpl += ' ' * 8 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
           eventimpl += ' ' * 6 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
           extended_events[event_tag] = None
       else:
-        event_tag = event.name.upper()
+        event_tag = normalize(event.name)
         eventimpl += ' ' * 4 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
         eventimpl += ' ' * 6 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
         eventimpl += ' ' * 4 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
@@ -106,9 +108,9 @@
         found_action = False
         for transaction in state.transactions:
           if transaction.guard:
-            event_tag = (transaction.event.name + '_' + normalize(transaction.guard)).upper()
+            event_tag = normalize(transaction.event.name) + '_' + normalize(transaction.guard)
           else:
-            event_tag = transaction.event.name.upper()
+            event_tag = normalize(transaction.event.name)
           if tag == event_tag:
             if transaction.target:
               target = transaction.target
@@ -117,13 +119,17 @@
               action = 'None'
               found_action = True
             elif len(transaction.actions) == 1:
-              args = ''.join([x.name for x in transaction.actions[0].arguments])
-              params = ''.join([x.name for x in transaction.event.parameters])
-              if args == params:
-                action = 'self.delegate.%s' % transaction.actions[0].name
-                found_action = True
+              if len(transaction.actions[0].name) > 0:
+                args = ''.join([x.name for x in transaction.actions[0].arguments])
+                params = ''.join([x.name for x in transaction.event.parameters])
+                if args == params:
+                  action = 'self.delegate.%s' % normalize(transaction.actions[0].name).lower()
+                  found_action = True
+                else:
+                  action = ('self._%s_%s_action' % (normalize(state.name), tag)).lower()
+                  found_action = True
               else:
-                action = ('self._%s_%s_action' % (normalize(state.name), tag)).lower()
+                action = 'None'
                 found_action = True
             else:
               action = ('self._%s_%s_action' % (normalize(state.name), tag)).lower()
@@ -152,7 +158,7 @@
           event_tag = transaction.event.name.lower()
         actionimpl += ' ' * 2 + 'def _%s_%s_action(self, %s):\n' % (normalize(state.name).lower(), event_tag, ', '.join(['ctx'] + [x.name.lower() for x in transaction.event.parameters]))
         for action in transaction.actions:
-          actionimpl += ' ' * 6 + 'self.delegate.%s(%s)\n' % (action.name, ', '.join(['ctx'] + [x.name for x in action.arguments]))
+          actionimpl += ' ' * 6 + 'self.delegate.%s(%s)\n' % (normalize(action.name).lower(), ', '.join(['ctx'] + [x.name for x in action.arguments]))
         actionimpl += '\n'
     code = '_transactions_target = [%s]\n\n\n' % (', '.join(targetstable))
     code += 'class StateMachine:\n'
