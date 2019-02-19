@@ -8,7 +8,7 @@
 #+begin_src python :noweb-ref normalize
   def normalize(string):
     mappings = {}
-    mappings['_'] = '_UNDERLINE_'
+    #mappings['_'] = '_UNDERLINE_'
     mappings['!='] = '_NOT_EQUALS_'
     mappings[':='] = '_ASSIGN_TO_'
     mappings['=='] = '_EQUALS_'
