@@ -16,8 +16,12 @@
   <<save-delegate>>
   <<save-state-machine>>
   def save(dst: str, states: List[State]):
+    import os.path
     if dst.endswith('python'):
       dst = dst[:-4]
+    (path, filename) = os.path.split(dst)
+    (name, ext) = os.path.splitext(filename)
+    dst = os.path.join(path, name.replace(' ', '_').replace('-', '_') + ext)
     with open(dst, 'w') as f:
       f.write('from abc import ABC, abstractmethod\n\n')
       f.write(_save_states(states))
