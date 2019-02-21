@@ -15,7 +15,7 @@
   <<save-states>>
   <<save-delegate>>
   <<save-state-machine>>
-  def save(dst: str, states: List[State]):
+  def save(dst: str, variables: List[Variable], states: List[State]):
     import os.path
     if dst.endswith('python'):
       dst = dst[:-4]

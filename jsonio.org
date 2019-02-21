@@ -383,14 +383,14 @@
           for action in actions:
             matched = re.search('(.*)=(.*)', action)
             if matched:
-              varname = matched[1]
-              exp = matched[2]
-              assignment = Assignment(Literal(varname), exp)
+              varname = matched[1].strip()
+              exp = matched[2].strip()
+              assignment = Assignment(Identifier(varname), exp)
               transaction.actions.append(assignment)
               continue
             matched = re.search('(.*)\((.*)\)', action)
             if matched:
-              call = Call(Identifier(matched[1]), [], None)
+              call = Call(Identifier(matched[1].strip()), [], None)
               call._operandstrs = [x.strip() for x in matched[2].split(',')]
               transaction.actions.append(call)
               continue
@@ -456,8 +456,8 @@
     events = {}
     for state in states:
       for transaction in state.transactions:
-        events[transaction.event] = None
-    data = {'events': [x for x in events.keys()], 'states': states}
+        events[str(transaction.event)] = transaction.event
+    data = {'variables': variables, 'events': [x for x in events.values()], 'states': states}
     with open(dst, 'w') as f:
       f.write(json.dumps(data, cls=ModelJSONEncoder, indent=2))
 #+end_src

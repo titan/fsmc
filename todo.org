@@ -22,12 +22,12 @@
 *** DONE verify variable
 *** DONE verify transaction
 ** TODO Plantuml
-** DONE Excel [75%]
+** DONE Excel [100%]
 *** DONE basic framework
-*** TODO parse variables
+*** DONE parse variables
 *** DONE parse events
 *** DONE parse states
-*** TODO verify variable
+*** DONE verify variable
 *** DONE verify parameter
 *** DONE verify event
 *** DONE verify transaction
@@ -36,8 +36,8 @@
 *** DONE basic framework
 *** DONE states
 *** DONE action delegate
-*** TODO guard delegate
-*** TODO variable delegate
+*** INPROGRESS guard delegate
+*** INPROGRESS variable delegate
 *** DONE state machine
 ** DONE JSON [100%]
 *** DONE basic framework

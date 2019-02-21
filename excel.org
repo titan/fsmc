@@ -4,6 +4,7 @@
 #+begin_src python :tangle ${BUILDDIR}/excel.py
   from typing import List, Mapping, Tuple
   from model import Event, Parameter, State, Transaction, Variable
+  from semantic import Assignment, Call, Identifier
   import re
 
   <<importer>>
@@ -92,6 +93,7 @@
   <<verify-transaction>>
   def _parse_states(wx, headers: List[Tuple[Event, str]]) -> List[State]:
     states = []
+    variables = {}
     for i in range(2, wx.max_row + 1):
       row = wx[i]
       state = State()
@@ -112,15 +114,26 @@
               state_mode = True
               continue
             if not state_mode:
-              action = Action()
+              matched = re.search('(.*):(.*)=(.*)', line)
+              if matched:
+                varname = matched[1].strip()
+                vartype = matched[2].strip()
+                exp = matched[3].strip()
+                var = Variable(varname, vartype)
+                variables[var.name] = var
+                assignment = Assignment(Identifier(varname), exp)
+                transaction.actions.append(assignment)
+                continue
               matched = re.search('(.*)\((.*)\)', line)
               if matched:
-                action.name = matched[1]
-                action._argumentstrs = [x.strip() for x in matched[2].split(',')]
+                call = Call(Identifier(matched[1].strip()), [], None)
+                call._operandstrs = [x.strip() for x in matched[2].split(',')]
+                transaction.actions.append(call)
+                continue
               else:
-                action.name = line
-                action._argumentstrs = None
-              transaction.actions.append(action)
+                call = Call(Identifier(line), [], None)
+                call._operandstrs = None
+                transaction.actions.append(call)
             else:
               transaction._targetstr = line
           state.transactions.append(transaction)
@@ -128,7 +141,7 @@
     for state in states:
       for t in state.transactions:
         _verify_transaction(t, states)
-    return states
+    return ([x for x in variables.values()], states)
 #+end_src
 **** verify transaction
 #+begin_src python :noweb-ref verify-transaction
@@ -143,17 +156,20 @@
         exit(1)
     if len(t.actions) > 0:
       for action in t.actions:
-        if action._argumentstrs:
-          args = []
-          for arg in action._argumentstrs:
-            found: bool = False
-            for param in t.event.parameters:
-              if arg == param.name:
-                args.append(param)
-                found = True
-                break
-            if not found:
-              print('Undefined action arguments "%s" in action: %s' % (arg, action))
-              exit(1)
-          action.arguments = args
+        if isinstance(action, Assignment):
+          pass
+        elif isinstance(action, Call):
+          if action._operandstrs:
+            args = []
+            for arg in action._operandstrs:
+              found: bool = False
+              for param in t.event.parameters:
+                if arg == param.name:
+                  args.append(Identifier(arg))
+                  found = True
+                  break
+              if not found:
+                print('Undefined action arguments "%s" in action: %s' % (arg, action))
+                exit(1)
+            action.operands = args
 #+end_src

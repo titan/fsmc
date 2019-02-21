@@ -27,11 +27,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self):
-      self.left = None
-      self.right = None
-
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -46,7 +42,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -60,10 +56,7 @@
   class NotExpression(Expression):
     exp: Expression
 
-    def __init__(self):
-      self.exp = None
-
-    def __init__(self, exp: Expression):
+    def __init__(self, exp: Expression = None):
       self.exp = exp
 
     def __str__(self):
@@ -77,7 +70,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -92,7 +85,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -107,7 +100,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -122,7 +115,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -137,7 +130,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -152,7 +145,7 @@
     left: Expression
     right: Expression
 
-    def __init__(self, left: Expression, right: Expression):
+    def __init__(self, left: Expression = None, right: Expression = None):
       self.left = left
       self.right = right
 
@@ -167,10 +160,7 @@
   class Identifier:
     name: str
 
-    def __init__(self):
-      self.name = None
-
-    def __init__(self, name: str):
+    def __init__(self, name: str = None):
       self.name = name
 
     def __str__(self):
@@ -185,11 +175,7 @@
     name: str
     type: str
 
-    def __init__(self):
-      self.name = None
-      self.type = None
-
-    def __init__(self, name: str, type: str):
+    def __init__(self, name: str = None, type: str = None):
       self.name = name
       self.type = type
 
@@ -211,12 +197,7 @@
     operands: List[Union[Identifier, Literal]]
     type: str
 
-    def __init__(self):
-      self.operator = None
-      self.operands = []
-      self.type = None
-
-    def __init__(self, operator: Identifier, operands: List[Union[Identifier, Literal]], type: str):
+    def __init__(self, operator: Identifier = None, operands: List[Union[Identifier, Literal]] = [], type: str = None):
       self.operator = operator
       self.operands = operands
       self.type = type
@@ -233,11 +214,7 @@
     target: Identifier
     expression: Expression
 
-    def __init__(self):
-      self.target = None
-      self.expression = None
-
-    def __init__(self, target: Identifier, expression: Expression):
+    def __init__(self, target: Identifier = None, expression: Expression = None):
       self.target = target
       self.expression = expression
 
