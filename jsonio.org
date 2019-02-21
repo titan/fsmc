@@ -2,8 +2,9 @@
 * JSON
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/jsonio.py
-  from typing import List, Mapping
-  from model import Action, Event, Parameter, State, Transaction
+  from typing import List, Mapping, Tuple
+  from model import Event, Parameter, State, Transaction, Variable
+  from semantic import Assignment, Call, Identifier
   import json
   import re
 
@@ -258,14 +259,45 @@
 #+end_src
 *** basic
 #+begin_src python :noweb-ref importer
+  <<parse-variables>>
   <<parse-events>>
   <<parse-states>>
-  def load(src: str) -> List[Event]:
+  def load(src: str) -> Tuple[List[Variable], List[State]]:
     with open(src, 'r') as f:
       data = json.loads(f.read())
+      if 'variables' in data:
+        variables = _parse_variables(data['variables'])
+      else:
+        variables = []
       events = _parse_events(data['events'])
-      states = _parse_states(data['states'], events)
-      return states
+      states = _parse_states(data['states'], variables, events)
+      return (variables, states)
+#+end_src
+*** parse variables
+#+begin_src python :noweb-ref parse-variables
+  <<verify-variable>>
+  def _parse_variables(data: Mapping[str, str]) -> List[Variable]:
+    variables = []
+    for v in data:
+      variable = Variable()
+      for (k, v) in v.items():
+        if k == 'name':
+          variable.name = v
+        elif k == 'type':
+          variable.type = v
+      variables.append(_verify_variable(variable, v))
+    return variables
+#+end_src
+**** verify-variable
+#+begin_src python :noweb-ref verify-variable
+  def _verify_variable(v: Variable, d: Mapping[str, str]) -> Variable:
+    if not v.name:
+      print('Missing name in variable: %s' % json.dumps(d))
+      exit(1)
+    if not v.type:
+      print('Missing type in variable: %s' % json.dumps(d))
+      exit(1)
+    return v
 #+end_src
 *** parse events
 #+begin_src python :noweb-ref parse-events
@@ -316,7 +348,7 @@
 #+begin_src python :noweb-ref parse-states
   <<parse-transactions>>
   <<verify-transaction>>
-  def _parse_states(data: Mapping[str, str], events: List[Event]) -> List[State]:
+  def _parse_states(data: Mapping[str, str], variables: List[Variable], events: List[Event]) -> List[State]:
     states = []
     for s in data:
       state = State()
@@ -324,18 +356,18 @@
         if k == 'name':
           state.name = v
         elif k == 'transactions':
-          state.transactions = _parse_transactions(v, events)
+          state.transactions = _parse_transactions(v)
         elif k == 'states':
           state.substates = _parse_states(v)
       states.append(state)
     for state in states:
       for t in state.transactions:
-        _verify_transaction(t, states, events)
+        _verify_transaction(t, states, variables, events)
     return states
 #+end_src
 *** parse transactions
 #+begin_src python :noweb-ref parse-transactions
-  def _parse_transactions(data: Mapping[str, str], events: List[Event]) -> List[Transaction]:
+  def _parse_transactions(data: Mapping[str, str]) -> List[Transaction]:
     transactions = []
     for t in data:
       transaction = Transaction()
@@ -348,16 +380,25 @@
           transaction.guard = v
         elif k == 'action':
           actions = v.split('\n')
-          for act in actions:
-            action = Action()
-            matched = re.search('(.*)\((.*)\)', act)
+          for action in actions:
+            matched = re.search('(.*)=(.*)', action)
             if matched:
-              action.name = matched[1]
-              action._argumentstrs = [x.strip() for x in matched[2].split(',')]
+              varname = matched[1]
+              exp = matched[2]
+              assignment = Assignment(Literal(varname), exp)
+              transaction.actions.append(assignment)
+              continue
+            matched = re.search('(.*)\((.*)\)', action)
+            if matched:
+              call = Call(Identifier(matched[1]), [], None)
+              call._operandstrs = [x.strip() for x in matched[2].split(',')]
+              transaction.actions.append(call)
+              continue
             else:
-              action.name = act
-              action._argumentstrs = None
-            transaction.actions.append(action)
+              call = Call(Identifier(action), [], None)
+              call._operandstrs = None
+              transaction.actions.append(call)
+              continue
         elif k == 'target':
           transaction._targetstr = v
       transactions.append(transaction)
@@ -365,7 +406,7 @@
 #+end_src
 **** verify transaction
 #+begin_src python :noweb-ref verify-transaction
-  def _verify_transaction(t: Transaction, states: List[State], events: List[Event]):
+  def _verify_transaction(t: Transaction, states: List[State], variables: List[Variable], events: List[Event]):
     if t._eventstr:
       for event in events:
         if event.name == t._eventstr:
@@ -384,25 +425,34 @@
         exit(1)
     if len(t.actions) > 0:
       for action in t.actions:
-        if action._argumentstrs:
-          args = []
-          for arg in action._argumentstrs:
-            found: bool = False
-            for param in t.event.parameters:
-              if arg == param.name:
-                args.append(param)
-                found = True
-                break
-            if not found:
-              print('Undefined action arguments "%s" in action: %s' % (arg, action))
-              exit(1)
-          action.arguments = args
+        if isinstance(action, Assignment):
+          found: bool = False
+          for var in variables:
+            if var.name == action.target.name:
+              found = True
+              break
+          if not found:
+            print('Undefined variable "%s" in action: %s' % (action.target.name, action))
+        elif isinstance(action, Call):
+          if action._operandstrs:
+            args = []
+            for arg in action._operandstrs:
+              found: bool = False
+              for param in t.event.parameters:
+                if arg == param.name:
+                  args.append(Identifier(arg))
+                  found = True
+                  break
+              if not found:
+                print('Undefined action arguments "%s" in action: %s' % (arg, action))
+                exit(1)
+            action.operands = args
 #+end_src
 ** exporter
 *** basic
 #+begin_src python :noweb-ref exporter
   <<json-encoder>>
-  def save(dst: str, states: List[State]):
+  def save(dst: str, variables: List[Variable], states: List[State]):
     events = {}
     for state in states:
       for transaction in state.transactions:
@@ -415,6 +465,8 @@
 #+begin_src python :noweb-ref json-encoder
   class ModelJSONEncoder(json.JSONEncoder):
     def default(self, obj):
+      if isinstance(obj, Variable):
+        return { 'name': obj.name, 'type': obj.type }
       if isinstance(obj, Event):
         data = { 'name': obj.name }
         if len(obj.parameters) > 0:
@@ -427,20 +479,18 @@
         return data
       if isinstance(obj, State):
         return { 'name': obj.name, 'transactions': obj.transactions }
-      if isinstance(obj, Action):
-        data = { 'name': obj.name }
-        if obj.arguments:
-          data['arguments'] = obj.arguments
-        return data
       if isinstance(obj, Transaction):
         data = {}
         if len(obj.actions) > 0:
           actions = []
           for action in obj.actions:
-            if len(action.arguments) > 0:
-              actions.append('%s(%s)' % (action.name, ', '.join([x.name for x in action.arguments])))
-            elif len(action.name) > 0:
-              actions.append(action.name)
+            if isinstance(action, Assignment):
+              actions.append(str(action))
+            elif isinstance(action, Call):
+              if len(action.operands) > 0:
+                actions.append(str(action))
+              elif len(action.operator.name) > 0:
+                actions.append(action.operator.name)
           if len(actions) > 0:
             data['action'] = '\n'.join(actions)
         if obj.event:

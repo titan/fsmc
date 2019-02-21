@@ -1,0 +1,249 @@
+#+STARTUP: indent
+* Semantic
+** framework
+#+begin_src python :tangle ${BUILDDIR}/semantic.py
+  from typing import List, NewType, Union
+
+  <<expression>>
+
+
+  <<identifier>>
+
+
+  <<literal>>
+
+
+  <<call>>
+
+
+  <<assignment>>
+#+end_src
+** Expression
+#+begin_src python :noweb-ref expression
+  class Expression:
+    pass
+
+  class AndExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self):
+      self.left = None
+      self.right = None
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s and %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'AndExpression(%s, %s)' % (self.left, self.right)
+
+
+  class OrExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s or %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'OrExpression(%s, %s)' % (self.left, self.right)
+
+
+  class NotExpression(Expression):
+    exp: Expression
+
+    def __init__(self):
+      self.exp = None
+
+    def __init__(self, exp: Expression):
+      self.exp = exp
+
+    def __str__(self):
+      return 'not %s' % str(exp)
+
+    def __repr__(self):
+      return 'NotExpression(%s)' % (self.exp)
+
+
+  class EqualsExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s == %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'EqualsExpression(%s, %s)' % (self.left, self.right)
+
+
+  class NotEqualToExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s != %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'NotEqualToExpression(%s, %s)' % (self.left, self.right)
+
+
+  class GreaterThanExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s > %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'GreaterThanExpression(%s, %s)' % (self.left, self.right)
+
+
+  class GreaterThanOrEqualToExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s >= %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'GreaterThanOrEqualToExpression(%s, %s)' % (self.left, self.right)
+
+
+  class LessThanExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s < %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'LessThanExpression(%s, %s)' % (self.left, self.right)
+
+
+  class LessThanOrEqualToExpression(Expression):
+    left: Expression
+    right: Expression
+
+    def __init__(self, left: Expression, right: Expression):
+      self.left = left
+      self.right = right
+
+    def __str__(self):
+      return '%s <= %s' % (str(self.left), str(self.right))
+
+    def __repr__(self):
+      return 'LessThanOrEqualToExpression(%s, %s)' % (self.left, self.right)
+#+end_src
+** Identifier
+#+begin_src python :noweb-ref identifier
+  class Identifier:
+    name: str
+
+    def __init__(self):
+      self.name = None
+
+    def __init__(self, name: str):
+      self.name = name
+
+    def __str__(self):
+      return self.name
+
+    def __repr__(self):
+      return 'Identifier(%s)' % self.name
+#+end_src
+** Literal
+#+begin_src python :noweb-ref literal
+  class Literal(Expression):
+    name: str
+    type: str
+
+    def __init__(self):
+      self.name = None
+      self.type = None
+
+    def __init__(self, name: str, type: str):
+      self.name = name
+      self.type = type
+
+    def __str__(self):
+      if self.type == 'char':
+        return "'%s'" % self.name
+      elif self.type == 'string':
+        return '"%s"' % self.name
+      else:
+        return self.name
+
+    def __repr__(self):
+      return 'Literal(%s: %s)' % (self.name, self.type)
+#+end_src
+** Call
+#+begin_src python :noweb-ref call
+  class Call(Expression):
+    operator: Identifier
+    operands: List[Union[Identifier, Literal]]
+    type: str
+
+    def __init__(self):
+      self.operator = None
+      self.operands = []
+      self.type = None
+
+    def __init__(self, operator: Identifier, operands: List[Union[Identifier, Literal]], type: str):
+      self.operator = operator
+      self.operands = operands
+      self.type = type
+
+    def __str__(self):
+      return '%s(%s)' % (str(self.operator), ', '.join([str(x) for x in self.operands]))
+
+    def __repr__(self):
+      return 'Call(%s: %s -> %s)' % (self.operator, self.operands, self.type)
+#+end_src
+** Assignment
+#+begin_src python :noweb-ref assignment
+  class Assignment:
+    target: Identifier
+    expression: Expression
+
+    def __init__(self):
+      self.target = None
+      self.expression = None
+
+    def __init__(self, target: Identifier, expression: Expression):
+      self.target = target
+      self.expression = expression
+
+    def __str__(self):
+      return '%s = %s' % (str(self.target), str(self.expression))
+
+    def __repr__(self):
+      return 'Assignment(%s: %s)' % (self.target, self.expression)
+#+end_src

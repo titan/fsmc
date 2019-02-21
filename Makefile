@@ -2,7 +2,7 @@ NAME=fsmc
 
 include .config
 ESCAPED_BUILDDIR = $(shell echo '${BUILDDIR}' | sed 's%/%\\/%g')
-TARGET=fsmc.py model.py jsonio.py python.py utility.py excel.py
+TARGET=fsmc.py model.py jsonio.py python.py utility.py excel.py semantic.py
 
 vpath %.org .
 vpath %.py $(BUILDDIR)

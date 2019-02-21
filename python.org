@@ -3,7 +3,7 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/python.py
   from typing import List, Mapping
-  from model import Action, Event, Parameter, State, Transaction
+  from model import Event, Parameter, State, Transaction, Variable
   from utility import normalize
 
   <<exporter>>

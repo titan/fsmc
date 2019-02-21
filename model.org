@@ -1,10 +1,30 @@
 #+STARTUP: indent
 
 * Data Model
+** framework
 #+begin_src python :tangle ${BUILDDIR}/model.py
-  from typing import List, NewType
+  from typing import List, NewType, Union
+  from semantic import Assignment, Call
 
 
+  <<parameter>>
+
+
+  <<variable>>
+
+
+  <<event>>
+
+
+  State = NewType('State', object)
+  Transaction = NewType('Transaction', object)
+  <<state>>
+
+
+  <<transaction>>
+#+end_src
+** parameter
+#+begin_src python :noweb-ref parameter
   class Parameter:
     name: str
     type: str
@@ -22,9 +42,27 @@
         return '%s: %s' % (self.name, self.type)
 
     def __repr__(self):
-      return self.__str__()
+      return 'Parameter(name: %s, type: %s, default: %s)' % (self.name, self.type, self.default)
+#+end_src
 
+** variable
+#+begin_src python :noweb-ref variable
+  class Variable:
+    name: str
+    type: str
 
+    def __init__(self):
+      self.name = None
+      self.type = None
+
+    def __str__(self):
+      return '%s: %s' % (self.name, self.type)
+
+    def __repr__(self):
+      return 'Variable(name: %s, type: %s)' % (self.name, self.type)
+#+end_src
+** event
+#+begin_src python :noweb-ref event
   class Event:
     name: str
     parameters: List[Parameter]
@@ -32,11 +70,9 @@
     def __init__(self):
       self.name = None
       self.parameters = []
-
-
-  State = NewType('State', object)
-  Transaction = NewType('Transaction', object)
-
+#+end_src
+** state
+#+begin_src python :noweb-ref state
   class State:
     name: str
     transactions: List[Transaction]
@@ -46,27 +82,13 @@
       self.name = None
       self.transactions = []
       self.substates = []
-
-
-  class Action:
-    name: str
-    arguments: List[Parameter]
-
-    def __init__(self):
-      self.name = None
-      self.arguments = []
-
-    def __str__(self):
-      return '%s(%s)' % (self.name, ', '.join([str(x) for x in self.arguments]))
-
-    def __repr__(self):
-      return self.__str__()
-
-
+#+end_src
+** transaction
+#+begin_src python :noweb-ref transaction
   class Transaction:
     event: Event
     guard: str
-    actions: List[Action]
+    actions: List[Union[Assignment, Call]]
     target: State
 
     def __init__(self):

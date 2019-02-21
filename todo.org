@@ -1,18 +1,67 @@
 #+TODO: TODO INPROGRESS | DONE
 #+STARTUP: indent
-* core logic [33%]
-** INPROGRESS Data model
+* core logic [66%]
+** INPROGRESS Data model [83%]
+*** DONE Parameter
+*** DONE Event
+*** DONE State
+*** DONE Transaction
+*** TODO Guard
+*** DONE Variable
 ** DONE Build system
-** INPROGRESS Framework
+** DONE Framework
 * importer [66%]
-** DONE JSON
+** DONE JSON [100%]
+*** DONE basic framework
+*** DONE parse events
+*** DONE parse variables
+*** DONE parse states
+*** DONE parse transactions
+*** DONE verify parameter
+*** DONE verify event
+*** DONE verify variable
+*** DONE verify transaction
 ** TODO Plantuml
-** DONE Excel
-* exporter [66%]
-** DONE Python
-** DONE JSON
+** DONE Excel [75%]
+*** DONE basic framework
+*** TODO parse variables
+*** DONE parse events
+*** DONE parse states
+*** TODO verify variable
+*** DONE verify parameter
+*** DONE verify event
+*** DONE verify transaction
+* exporter [33%]
+** INPROGRESS Python [66%]
+*** DONE basic framework
+*** DONE states
+*** DONE action delegate
+*** TODO guard delegate
+*** TODO variable delegate
+*** DONE state machine
+** DONE JSON [100%]
+*** DONE basic framework
+*** DONE JSON Encoder [100%]
+**** DONE Variable
+**** DONE Event
+**** DONE Parameter
+**** DONE State
+**** DONE Action
+**** DONE Transaction
+**** DONE Call
+**** DONE Assignment
 ** TODO Plantuml
-* semanticization [0%]
-** INPROGRESS model
-** INPROGRESS guard
+* semanticization [33%]
+** DONE model [100%]
+*** DONE Expression
+*** DONE Identifier
+*** DONE Literal
+*** DONE Call
+*** DONE Assignment
+** TODO Lexer [0%]
+*** TODO fsm defination
+*** TODO guard delegate
+*** TODO action delegate
+*** TODO output delegate
+** TODO guard
 ** TODO action

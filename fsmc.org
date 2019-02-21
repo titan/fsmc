@@ -15,7 +15,6 @@
 * Core Logic
 ** Framework
 #+begin_src python :tangle ${BUILDDIR}/fsmc.py
-  from model import Action, Event, State, Transaction
   import jsonio
   import python
   import excel
@@ -36,8 +35,8 @@
   def main(args):
     import os
     <<extract-arguments>>
-    states = importers[fronn](input)
-    exporters[to](output, states)
+    (variables, states) = importers[fronn](input)
+    exporters[to](output, variables, states)
 
   if __name__ == '__main__':
     import argparse
