@@ -4,6 +4,7 @@
 #+begin_src python :tangle ${BUILDDIR}/python.py
   from typing import List, Mapping
   from model import Event, Parameter, State, Transaction, Variable
+  from semantic import Assignment, Call, Identifier, find_call_in_expression
   from utility import normalize
 
   <<exporter>>
@@ -13,7 +14,7 @@
 *** basic
 #+begin_src python :noweb-ref exporter
   <<save-states>>
-  <<save-delegate>>
+  <<save-delegates>>
   <<save-state-machine>>
   def save(dst: str, variables: List[Variable], states: List[State]):
     import os.path
@@ -25,7 +26,7 @@
     with open(dst, 'w') as f:
       f.write('from abc import ABC, abstractmethod\n\n')
       f.write(_save_states(states))
-      f.write(_save_delegate(states))
+      f.write(_save_delegates(variables, states))
       f.write(_save_state_machine(states))
 #+end_src
 *** states
@@ -38,21 +39,66 @@
       i += 1
     return code + '\n\n'
 #+end_src
-*** delegate
-#+begin_src python :noweb-ref save-delegate
-  def _save_delegate(states: List[State]) -> str:
+*** delegates
+#+begin_src python :noweb-ref save-delegates
+  <<action-delegate>>
+  <<guard-delegate>>
+  <<variable-delegate>>
+  def _save_delegates(variables: List[Variable], states: List[State]) -> str:
+    code = ''
+    code += _save_action_delegate(states) + '\n'
+    code += _save_guard_delegate(states) + '\n'
+    code += _save_variable_delegate(variables) + '\n'
+    return code
+#+end_src
+**** aciton delegate
+#+begin_src python :noweb-ref action-delegate
+  def _save_action_delegate(states: List[State]) -> str:
     actions = {}
     for state in states:
       for transaction in state.transactions:
         for action in transaction.actions:
-          actions[action.name] = action
-    code = 'class StateMachineDelegate(ABC):\n\n'
+          if isinstance(action, Call):
+            actions[str(action.operator)] = action
+          elif isinstance(action, Assignment):
+            for call in find_call_in_expression(action.expression):
+              actions[str(call.operator)] = call
+    count = 0
+    code = 'class ActionDelegate(ABC):\n\n'
     for action in actions.values():
-      if len(action.name) == 0:
+      if len(str(action.operator)) == 0:
         continue
       code += ' ' * 2 + '@abstractmethod\n'
-      code += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(action.name).lower(), ', '.join(['ctx'] + [x.name.lower() for x in action.arguments]))
+      code += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(str(action.operator).replace('_', ' ').replace('-', ' ')).lower(), ', '.join(['ctx'] + [str(x).lower() for x in action.operands]))
       code += ' ' * 4 + 'return NotImplemented\n\n'
+      count += 1
+    if count == 0:
+      code += ' ' * 2 + 'pass\n'
+    return code + '\n'
+#+end_src
+**** guard delegate
+#+begin_src python :noweb-ref guard-delegate
+  def _save_guard_delegate(states: List[State]) -> str:
+    for state in states:
+      for transaction in state.transactions:
+        guard = transaction.guard
+
+    code = 'class GuardDelegate(ABC):\n\n'
+    code += ' ' * 2 + 'pass\n'
+    return code + '\n'
+#+end_src
+**** variable delegate
+#+begin_src python :noweb-ref variable-delegate
+  def _save_variable_delegate(variables: List[Variable]) -> str:
+    code = 'class VariableDelegate(ABC):\n\n'
+    count = 0
+    for variable in variables:
+      code += ' ' * 2 + '@abstractmethod\n'
+      code += ' ' * 2 + 'def on_%s_changed(self, %s):\n' % (variable.name, variable.name)
+      code += ' ' * 4 + 'return NotImplemented\n\n'
+      count += 1
+    if count == 0:
+      code += ' ' * 2 + 'pass\n'
     return code + '\n'
 #+end_src
 *** state machine
@@ -60,7 +106,6 @@
   def _save_state_machine(states: List[State]) -> str:
     events = {}
     extended_events = {}
-    targettable = {}
     eventimpl = ''
     for state in states:
       for transaction in state.transactions:
@@ -100,6 +145,8 @@
       eventidx += 1
     targetstable = []
     actionstable = []
+    actionblocks = {}
+    actionblockid = 0
     for state in states:
       targets = []
       actions = []
@@ -119,20 +166,33 @@
               action = 'None'
               found_action = True
             elif len(transaction.actions) == 1:
-              if len(transaction.actions[0].name) > 0:
-                args = ''.join([x.name for x in transaction.actions[0].arguments])
+              if isinstance(transaction.actions[0], Call):
+                args = ''.join([str(x) for x in transaction.actions[0].operands])
                 params = ''.join([x.name for x in transaction.event.parameters])
                 if args == params:
-                  action = 'self.delegate.%s' % normalize(transaction.actions[0].name).lower()
+                  action = 'self.action_delegate.%s' % normalize(str(transaction.actions[0].operator).replace('-', ' ').replace('_', ' ' )).lower()
                   found_action = True
                 else:
-                  action = ('self._%s_%s_action' % (normalize(state.name), tag)).lower()
-                  found_action = True
+                  actionblock = str(transaction.actions[0])
+                  if actionblock not in actionblocks:
+                    action = 'self._action_block_%d' % actionblockid
+                    actionblocks[actionblock] = (action, False)
+                    actionblockid += 1
+                    found_action = True
+                  else:
+                    (action, _) = actionblocks[actionblock]
+                    found_action = True
               else:
                 action = 'None'
                 found_action = True
             else:
-              action = ('self._%s_%s_action' % (normalize(state.name), tag)).lower()
+              actionblock = '\n'.join([str(x) for x in transaction.actions])
+              if actionblock not in actionblocks:
+                action = 'self._action_block_%d' % actionblockid
+                actionblocks[actionblock] = (action, False)
+                actionblockid += 1
+              else:
+                (action, _) = actionblocks[actionblock]
               found_action = True
         if not found_target:
           target = state
@@ -148,24 +208,43 @@
         if len(transaction.actions) == 0:
           continue
         elif len(transaction.actions) == 1:
-          args = ''.join([x.name for x in transaction.actions[0].arguments])
-          params = ''.join([x.name for x in transaction.event.parameters])
-          if args == params:
+          if isinstance(transaction.actions[0], Call):
+            args = ''.join([str(x) for x in transaction.actions[0].operands])
+            params = ''.join([x.name for x in transaction.event.parameters])
+            if args == params:
+              continue
+          else:
             continue
-        if transaction.guard:
-          event_tag = (transaction.event.name + '_' + normalize(transaction.guard)).lower()
-        else:
-          event_tag = transaction.event.name.lower()
-        actionimpl += ' ' * 2 + 'def _%s_%s_action(self, %s):\n' % (normalize(state.name).lower(), event_tag, ', '.join(['ctx'] + [x.name.lower() for x in transaction.event.parameters]))
+        actionblock = '\n'.join([str(x) for x in transaction.actions])
+        (action, generated) = actionblocks[actionblock]
+        actionfun = action.replace('self.', '')
+        if generated:
+          continue
+        actionblocks[actionblock] = (action, True)
+        actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [x.name.lower() for x in transaction.event.parameters]))
         for action in transaction.actions:
-          actionimpl += ' ' * 6 + 'self.delegate.%s(%s)\n' % (normalize(action.name).lower(), ', '.join(['ctx'] + [x.name for x in action.arguments]))
+          if isinstance(action, Call):
+            actionimpl += ' ' * 6 + 'self.action_delegate.%s(%s)\n' % (normalize(str(action.operator).replace('-', ' ').replace('_', ' ')).lower(), ', '.join(['ctx'] + [str(x) for x in action.operands]))
+          elif isinstance(action, Assignment):
+            if isinstance(action.expression, Identifier):
+              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), str(action.expression))
+              actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
+            elif isinstance(action.expression, Call):
+              call = action.expression
+              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(%s)\n' % (str(action.target), str(call.operator), ', '.join(['ctx'] + [str(x) for x in call.operands]))
+              actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
+            else:
+              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), normalize(action.expression.replace('-', ' ').replace('_', ' ')).lower())
+              actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
         actionimpl += '\n'
     code = '_transactions_target = [%s]\n\n\n' % (', '.join(targetstable))
     code += 'class StateMachine:\n'
     code += eventdef + '\n'
-    code += ' ' * 2 + 'def __init__(self, delegate):\n'
+    code += ' ' * 2 + 'def __init__(self, action_delegate = None, guard_delegate = None, variable_delegate = None):\n'
     code += ' ' * 4 + 'self.state = State.%s\n' % normalize(states[0].name)
-    code += ' ' * 4 + 'self.delegate = delegate\n'
+    code += ' ' * 4 + 'self.action_delegate = action_delegate\n'
+    code += ' ' * 4 + 'self.guard_delegate = guard_delegate\n'
+    code += ' ' * 4 + 'self.variable_delegate = variable_delegate\n'
     code += ' ' * 4 + 'self._transactions_action = [%s]\n' % ', '.join(actionstable)
     code += '\n'
     return code + eventimpl + actionimpl
@@ -176,4 +255,4 @@
 | events          | Mapping[Event, List[Transaction]] |                       |
 | extended_events | Mapping[str, Transaction]         | key is event + guards |
 | guardmappings   | Mapping[str, Transaction]         | key is guard          |
-| targettable     | Mapping[Event, str]               |                       |
+| actionblocks    | Mapping[str, Tuple[str, bool]]    | key is actionblock    |

@@ -3,6 +3,21 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/semantic.py
   from typing import List, NewType, Union
+  from lexer_fsm import ActionDelegate as LexerActionDelegate, GuardDelegate as LexerGuardDelegate, VariableDelegate as LexerVariableDelegate, StateMachine as LexerStateMachine
+
+  <<model>>
+
+
+  <<utility>>
+
+
+  <<lexer>>
+
+
+#+end_src
+** model
+*** framework
+#+begin_src python :noweb-ref model
 
   <<expression>>
 
@@ -18,7 +33,7 @@
 
   <<assignment>>
 #+end_src
-** Expression
+*** Expression
 #+begin_src python :noweb-ref expression
   class Expression:
     pass
@@ -155,7 +170,7 @@
     def __repr__(self):
       return 'LessThanOrEqualToExpression(%s, %s)' % (self.left, self.right)
 #+end_src
-** Identifier
+*** Identifier
 #+begin_src python :noweb-ref identifier
   class Identifier:
     name: str
@@ -169,7 +184,7 @@
     def __repr__(self):
       return 'Identifier(%s)' % self.name
 #+end_src
-** Literal
+*** Literal
 #+begin_src python :noweb-ref literal
   class Literal(Expression):
     name: str
@@ -190,7 +205,7 @@
     def __repr__(self):
       return 'Literal(%s: %s)' % (self.name, self.type)
 #+end_src
-** Call
+*** Call
 #+begin_src python :noweb-ref call
   class Call(Expression):
     operator: Identifier
@@ -208,7 +223,7 @@
     def __repr__(self):
       return 'Call(%s: %s -> %s)' % (self.operator, self.operands, self.type)
 #+end_src
-** Assignment
+*** Assignment
 #+begin_src python :noweb-ref assignment
   class Assignment:
     target: Identifier
@@ -223,4 +238,1093 @@
 
     def __repr__(self):
       return 'Assignment(%s: %s)' % (self.target, self.expression)
+#+end_src
+** lexer
+*** framework
+#+begin_src python :noweb-ref lexer
+  <<lexer-context>>
+
+
+  <<lexer-action-delegate>>
+
+
+  <<lexer-guard-delegate>>
+
+
+  <<lexer-variable-delegate>>
+
+
+  class Lexer:
+    def __init__(self):
+      self._fsm = LexerStateMachine(_LexerActionDelegate(), _LexerGuardDelegate(), _LexerVariableDelegate())
+      self._ctx = _LexerContext()
+
+    def feed(self, ch):
+      if ch == '\r' or ch == '\n':
+        self._fsm.new_line(self._ctx)
+      else:
+        self._fsm.input(self._ctx, ch)
+
+    def eof(self):
+      self._fsm.eof(self._ctx)
+#+end_src
+*** fsm defination
+#+begin_src json :tangle ${BUILDDIR}/lexer-fsm.json
+  {
+    "variables": [
+      {
+        "name": "output",
+        "type": "token"
+      }
+    ],
+    "events": [
+      {
+        "name": "input",
+        "parameters": [
+          {
+            "name": "ch",
+            "type": "char"
+          }
+        ]
+      },
+      {
+        "name": "new line"
+      },
+      {
+        "name": "eof"
+      }
+    ],
+    "states": [
+      {
+        "name": "init",
+        "transactions": [
+          {
+            "action": "output = open parenthesis",
+            "event": "input",
+            "guard": "ch == '('"
+          },
+          {
+            "action": "output = close parenthesis",
+            "event": "input",
+            "guard": "ch == ')'"
+          },
+          {
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "string"
+          },
+          {
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "char ready"
+          },
+          {
+            "action": "error\nquit",
+            "event": "input",
+            "guard": "ch == '\\\\'"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "token"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isdigit(ch)",
+            "target": "number"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "token"
+          }
+        ]
+      },
+      {
+        "name": "token",
+        "transactions": [
+          {
+            "action": "output = token\noutput = open parenthesis\nclear buffer",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "init"
+          },
+          {
+            "action": "output = token\noutput = close parenthesis\nclear buffer",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "init"
+          },
+          {
+            "action": "output = token\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "string"
+          },
+          {
+            "action": "output = token\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "char ready"
+          },
+          {
+            "action": "output = token\noutput = dot\nclear buffer",
+            "event": "input",
+            "guard": "ch == '.'",
+            "target": "init"
+          },
+          {
+            "action": "error\nquit",
+            "event": "input",
+            "guard": "ch == '\\\\'"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isescaped(ch)"
+          },
+          {
+            "action": "output = token\nclear buffer",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isdigit(ch)"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isalpha(ch)"
+          },
+          {
+            "action": "output = token\nclear buffer",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "output = token\nclear buffer",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "number",
+        "transactions": [
+          {
+            "action": "output = number\noutput = open parenthesis\nclear buffer",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "init"
+          },
+          {
+            "action": "output = number\noutput = close parenthesis\nclear buffer",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "init"
+          },
+          {
+            "action": "output = number\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "string"
+          },
+          {
+            "action": "output = number\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "char ready"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '.'"
+          },
+          {
+            "action": "error\nquit",
+            "event": "input",
+            "guard": "ch == '\\\\'"
+          },
+          {
+            "action": "output = number\nclear buffer\nadd-to-buffer(ch)",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "token"
+          },
+          {
+            "action": "output = number\nclear buffer",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isdigit(ch)"
+          },
+          {
+            "action": "output = number\nclear buffer\nadd-to-buffer(ch)",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "token"
+          },
+          {
+            "action": "output = number\nclear buffer",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "output = number\nclear buffer",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "char ready",
+        "transactions": [
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "char"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "char"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "char"
+          },
+          {
+            "action": "output = empty char\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '.'",
+            "target": "char"
+          },
+          {
+            "event": "input",
+            "guard": "ch == '\\\\'",
+            "target": "escaped char ready"
+          },
+          {
+            "action": "output = empty char\nclear buffer",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "init"
+          },
+          {
+            "action": "output = empty char\nclear buffer",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "output = empty char\nclear buffer",
+            "event": "input",
+            "guard": "isdigit(ch)",
+            "target": "init"
+          },
+          {
+            "action": "output = empty char\nclear buffer",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "char",
+        "transactions": [
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "init"
+          },
+          {
+            "action": "output = char\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "ch == '.'",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "ch == '\\\\'",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "isdigit(ch)",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "char error\nquit",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "escaped char ready",
+        "transactions": [
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "escaped char"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '.'",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\\\\'",
+            "target": "escaped char"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "escaped char"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isdigit(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "escaped char",
+        "transactions": [
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "init"
+          },
+          {
+            "action": "output = escaped char\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '.'",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "ch == '\\\\'",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isdigit(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "escaped char error\nquit",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "string",
+        "transactions": [
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '('"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == ')'"
+          },
+          {
+            "action": "output = string\nclear buffer",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\\''"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '.'"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\\\\'",
+            "target": "escaped string"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isescaped(ch)"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isspace(ch)"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isdigit(ch)"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isalpha(ch)"
+          },
+          {
+            "action": "string error\nquit",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "string error\nquit",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      },
+      {
+        "name": "escaped string",
+        "transactions": [
+          {
+            "action": "escaped string error\nquit",
+            "event": "input",
+            "guard": "ch == '('",
+            "target": "init"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "input",
+            "guard": "ch == ')'",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\"'",
+            "target": "string"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\\''",
+            "target": "string"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "input",
+            "guard": "ch == '.'",
+            "target": "init"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "ch == '\\\\'",
+            "target": "string"
+          },
+          {
+            "action": "add-to-buffer(ch)",
+            "event": "input",
+            "guard": "isescaped(ch)",
+            "target": "string"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "input",
+            "guard": "isspace(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "input",
+            "guard": "isdigit(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "input",
+            "guard": "isalpha(ch)",
+            "target": "init"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "new line",
+            "target": "init"
+          },
+          {
+            "action": "escaped string error\nquit",
+            "event": "eof",
+            "target": "init"
+          }
+        ]
+      }
+    ]
+  }
+#+end_src
+#+begin_src python :tangle ${BUILDDIR}/lexer_fsm.py
+  from abc import ABC, abstractmethod
+
+  class State:
+    INIT = 0
+    TOKEN = 1
+    NUMBER = 2
+    CHAR_READY = 3
+    CHAR = 4
+    ESCAPED_CHAR_READY = 5
+    ESCAPED_CHAR = 6
+    STRING = 7
+    ESCAPED_STRING = 8
+
+
+  class ActionDelegate(ABC):
+
+    @abstractmethod
+    def error(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def quit(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def add_to_buffer(self, ctx, ch):
+      return NotImplemented
+
+    @abstractmethod
+    def clear_buffer(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def char_error(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def escaped_char_error(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def string_error(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def escaped_string_error(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def token(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def number(self, ctx):
+      return NotImplemented
+
+    @abstractmethod
+    def char(self, ctx):
+      return NotImplemented
+
+
+  class GuardDelegate(ABC):
+
+    @abstractmethod
+    def isalpha(self, ch):
+      return NotImplemented
+
+    @abstractmethod
+    def isescaped(self, ch):
+      return NotImplemented
+
+    @abstractmethod
+    def isdigit(self, ch):
+      return NotImplemented
+
+    @abstractmethod
+    def isspace(self, ch):
+      return NotImplemented
+
+
+  class VariableDelegate(ABC):
+
+    @abstractmethod
+    def on_output_changed(self, output):
+      return NotImplemented
+
+
+
+  _transactions_target = [[State.INIT, State.INIT, State.STRING, State.CHAR_READY, State.INIT, State.TOKEN, State.NUMBER, State.TOKEN, State.INIT, State.INIT, State.INIT, State.INIT], [State.INIT, State.INIT, State.STRING, State.CHAR_READY, State.TOKEN, State.TOKEN, State.TOKEN, State.TOKEN, State.INIT, State.INIT, State.INIT, State.INIT], [State.INIT, State.INIT, State.STRING, State.CHAR_READY, State.NUMBER, State.TOKEN, State.NUMBER, State.TOKEN, State.NUMBER, State.INIT, State.INIT, State.INIT], [State.CHAR, State.CHAR, State.CHAR, State.INIT, State.ESCAPED_CHAR_READY, State.INIT, State.INIT, State.INIT, State.CHAR, State.INIT, State.INIT, State.INIT], [State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT], [State.INIT, State.INIT, State.INIT, State.ESCAPED_CHAR, State.ESCAPED_CHAR, State.ESCAPED_CHAR, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT], [State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT], [State.STRING, State.STRING, State.INIT, State.STRING, State.ESCAPED_STRING, State.STRING, State.STRING, State.STRING, State.STRING, State.STRING, State.INIT, State.INIT], [State.INIT, State.INIT, State.STRING, State.STRING, State.STRING, State.STRING, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT, State.INIT]]
+
+
+  class StateMachine:
+    INPUT_CH_EQUALS_APOSTROPHE_OPEN_PARENTHESIS_APOSTROPHE = 0
+    INPUT_CH_EQUALS_APOSTROPHE_CLOSE_PARENTHESIS_APOSTROPHE = 1
+    INPUT_CH_EQUALS_APOSTROPHE_DOUBLE_QUOTES_APOSTROPHE = 2
+    INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_APOSTROPHE_APOSTROPHE = 3
+    INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_BACKSLASH_APOSTROPHE = 4
+    INPUT_ISESCAPED_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS = 5
+    INPUT_ISDIGIT_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS = 6
+    INPUT_ISALPHA_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS = 7
+    INPUT_CH_EQUALS_APOSTROPHE_DOT_APOSTROPHE = 8
+    INPUT_ISSPACE_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS = 9
+    NEW_LINE = 10
+    EOF = 11
+
+    def __init__(self, action_delegate = None, guard_delegate = None, variable_delegate = None):
+      self.state = State.INIT
+      self.action_delegate = action_delegate
+      self.guard_delegate = guard_delegate
+      self.variable_delegate = variable_delegate
+      self._transactions_action = [[None, None, None, None, self._action_block_0, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, None, None, None, None], [self._action_block_1, self._action_block_2, self._action_block_3, self._action_block_3, self._action_block_0, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self._action_block_4, self._action_block_3, self._action_block_3, self._action_block_3], [self._action_block_5, self._action_block_6, self._action_block_7, self._action_block_7, self._action_block_0, self._action_block_8, self.action_delegate.add_to_buffer, self._action_block_8, self.action_delegate.add_to_buffer, self._action_block_7, self._action_block_7, self._action_block_7], [self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self._action_block_9, None, self._action_block_9, self._action_block_9, self._action_block_9, self.action_delegate.add_to_buffer, self._action_block_9, self._action_block_10, self._action_block_10], [self._action_block_10, self._action_block_10, self._action_block_10, self._action_block_11, self._action_block_10, self._action_block_10, self._action_block_10, self._action_block_10, self._action_block_10, self._action_block_10, self._action_block_10, self._action_block_10], [self._action_block_12, self._action_block_12, self._action_block_12, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12], [self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_13, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12, self._action_block_12], [self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self._action_block_14, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self._action_block_15, self._action_block_15], [self._action_block_16, self._action_block_16, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self.action_delegate.add_to_buffer, self._action_block_16, self._action_block_16, self._action_block_16, self._action_block_16, self._action_block_16, self._action_block_16]]
+
+    def input(self, ctx, ch):
+      if ch == '(':
+        if self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_OPEN_PARENTHESIS_APOSTROPHE]:
+          self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_OPEN_PARENTHESIS_APOSTROPHE](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_OPEN_PARENTHESIS_APOSTROPHE]
+      elif ch == ')':
+        if self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_CLOSE_PARENTHESIS_APOSTROPHE]:
+          self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_CLOSE_PARENTHESIS_APOSTROPHE](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_CLOSE_PARENTHESIS_APOSTROPHE]
+      elif ch == '"':
+        if self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_DOUBLE_QUOTES_APOSTROPHE]:
+          self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_DOUBLE_QUOTES_APOSTROPHE](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_DOUBLE_QUOTES_APOSTROPHE]
+      elif ch == '\'':
+        if self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_APOSTROPHE_APOSTROPHE]:
+          self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_APOSTROPHE_APOSTROPHE](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_APOSTROPHE_APOSTROPHE]
+      elif ch == '\\':
+        if self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_BACKSLASH_APOSTROPHE]:
+          self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_BACKSLASH_APOSTROPHE](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_BACKSLASH_BACKSLASH_APOSTROPHE]
+      elif self.guard_delegate.isescaped(ch):
+        if self._transactions_action[self.state][self.INPUT_ISESCAPED_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]:
+          self._transactions_action[self.state][self.INPUT_ISESCAPED_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_ISESCAPED_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]
+      elif self.guard_delegate.isdigit(ch):
+        if self._transactions_action[self.state][self.INPUT_ISDIGIT_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]:
+          self._transactions_action[self.state][self.INPUT_ISDIGIT_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_ISDIGIT_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]
+      elif self.guard_delegate.isalpha(ch):
+        if self._transactions_action[self.state][self.INPUT_ISALPHA_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]:
+          self._transactions_action[self.state][self.INPUT_ISALPHA_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_ISALPHA_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]
+      elif ch == '.':
+        if self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_DOT_APOSTROPHE]:
+          self._transactions_action[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_DOT_APOSTROPHE](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_CH_EQUALS_APOSTROPHE_DOT_APOSTROPHE]
+      elif self.guard_delegate.isspace(ch):
+        if self._transactions_action[self.state][self.INPUT_ISSPACE_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]:
+          self._transactions_action[self.state][self.INPUT_ISSPACE_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS](ctx, ch)
+        self.state = _transactions_target[self.state][self.INPUT_ISSPACE_OPEN_PARENTHESIS_CH_CLOSE_PARENTHESIS]
+
+    def new_line(self, ctx):
+      if self._transactions_action[self.state][self.NEW_LINE]:
+        self._transactions_action[self.state][self.NEW_LINE](ctx)
+      self.state = _transactions_target[self.state][self.NEW_LINE]
+
+    def eof(self, ctx):
+      if self._transactions_action[self.state][self.EOF]:
+        self._transactions_action[self.state][self.EOF](ctx)
+      self.state = _transactions_target[self.state][self.EOF]
+
+    def _action_block_0(self, ctx, ch):
+        self.action_delegate.error(ctx)
+        self.action_delegate.quit(ctx)
+
+    def _action_block_1(self, ctx, ch):
+        output = self.action_delegate.token(ctx)
+        self.variable_delegate.on_output_changed(output)
+        output = self.action_delegate.open_parenthesis(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_2(self, ctx, ch):
+        output = self.action_delegate.token(ctx)
+        self.variable_delegate.on_output_changed(output)
+        output = self.action_delegate.close_parenthesis(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_3(self, ctx, ch):
+        output = self.action_delegate.token(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_4(self, ctx, ch):
+        output = self.action_delegate.token(ctx)
+        self.variable_delegate.on_output_changed(output)
+        output = self.action_delegate.dot(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_5(self, ctx, ch):
+        output = self.action_delegate.number(ctx)
+        self.variable_delegate.on_output_changed(output)
+        output = self.action_delegate.open_parenthesis(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_6(self, ctx, ch):
+        output = self.action_delegate.number(ctx)
+        self.variable_delegate.on_output_changed(output)
+        output = self.action_delegate.close_parenthesis(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_7(self, ctx, ch):
+        output = self.action_delegate.number(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_8(self, ctx, ch):
+        output = self.action_delegate.number(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+        self.action_delegate.add_to_buffer(ctx, ch)
+
+    def _action_block_9(self, ctx, ch):
+        output = self.action_delegate.empty_char(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_10(self, ctx):
+        self.action_delegate.char_error(ctx)
+        self.action_delegate.quit(ctx)
+
+    def _action_block_11(self, ctx, ch):
+        output = self.action_delegate.char(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_12(self, ctx, ch):
+        self.action_delegate.escaped_char_error(ctx)
+        self.action_delegate.quit(ctx)
+
+    def _action_block_13(self, ctx, ch):
+        output = self.action_delegate.escaped_char(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_14(self, ctx, ch):
+        output = self.action_delegate.string(ctx)
+        self.variable_delegate.on_output_changed(output)
+        self.action_delegate.clear_buffer(ctx)
+
+    def _action_block_15(self, ctx):
+        self.action_delegate.string_error(ctx)
+        self.action_delegate.quit(ctx)
+
+    def _action_block_16(self, ctx, ch):
+        self.action_delegate.escaped_string_error(ctx)
+        self.action_delegate.quit(ctx)
+#+end_src
+*** context
+#+begin_src python :noweb-ref lexer-context
+  class _LexerContext:
+    buffer: List[str]
+
+    def __init__(self):
+      self.buffer = []
+#+end_src
+*** delegates
+**** action delegate
+#+begin_src python :noweb-ref lexer-action-delegate
+  class _LexerActionDelegate(LexerActionDelegate):
+
+    def error(self, ctx):
+      print('Unknow error')
+
+    def quit(self, ctx):
+      exit(1)
+
+    def add_to_buffer(self, ctx, ch):
+      ctx.buffer.append(ch)
+
+    def clear_buffer(self, ctx):
+      ctx.buffer.clear()
+
+    def char_error(self, ctx):
+      print('Char error')
+
+    def escaped_char_error(self, ctx):
+      print('Escaped char error')
+
+    def string_error(self, ctx):
+      print('String error')
+
+    def escaped_string_error(self, ctx):
+      print('Escaped string error')
+
+    def token(self, ctx):
+      tkn = ''.join(ctx.buffer)
+      if tkn == 'true':
+        return Literal(tkn, 'bool')
+      elif tkn == 'false':
+        return Literal(tkn, 'bool')
+      else:
+        return Identifier(tkn)
+
+    def number(self, ctx):
+      num = ''.join(ctx.buffer)
+      return Literal(num, 'number')
+
+    def char(self, ctx):
+      ch = ''.join(ctx.buffer)
+      return Literal(ch, 'char')
+
+    def escaped_char(self, ctx):
+      ch = ''.join(ctx.buffer)
+      return Literal(ch, 'char')
+
+    def open_parenthesis(self, ctx):
+      return Identifier('(')
+
+    def close_parenthesis(self, ctx):
+      return Identifier(')')
+#+end_src
+**** guard delegate
+#+begin_src python :noweb-ref lexer-guard-delegate
+  class _LexerGuardDelegate(LexerGuardDelegate):
+
+    def isalpha(self, ch):
+      return ch.isalpha()
+
+    def isescaped(self, ch):
+      escaped = ['a', 'b', 't', 'n', 'v', 'f', 'r']
+      return ch in escaped
+
+    def isdigit(self, ch):
+      return ch.isdigit()
+
+    def isspace(self, ch):
+      return ch.isspace()
+#+end_src
+**** variable delegate
+#+begin_src python :noweb-ref lexer-variable-delegate
+  class _LexerVariableDelegate(LexerVariableDelegate):
+
+    def on_output_changed(self, output):
+      return NotImplemented
+#+end_src
+** utility
+*** framework
+#+begin_src python :noweb-ref utility
+  <<find-call-in-expression>>
+#+end_src
+*** find call in expression
+#+begin_src python :noweb-ref find-call-in-expression
+  def find_call_in_expression(exp: Expression):
+    if isinstance(exp, Call):
+      yield exp
+    elif isinstance(exp, AndExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, OrExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, NotExpression):
+      for x in find_call_in_expression(exp.exp):
+        yield x
+    elif isinstance(exp, EqualsExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, NotEqualToExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, GreaterThanExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, GreaterThanOrEqualToExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, LessThanExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
+    elif isinstance(exp, LessThanOrEqualToExpression):
+      for x in find_call_in_expression(exp.left):
+        yield x
+      for y in find_call_in_expression(exp.right):
+        yield y
 #+end_src

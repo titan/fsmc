@@ -4,7 +4,7 @@
 #+begin_src python :tangle ${BUILDDIR}/jsonio.py
   from typing import List, Mapping, Tuple
   from model import Event, Parameter, State, Transaction, Variable
-  from semantic import Assignment, Call, Identifier
+  from semantic import Assignment, Call, Identifier, Lexer
   import json
   import re
 
@@ -377,6 +377,10 @@
         if k == 'event':
           transaction._eventstr = v
         elif k == 'guard':
+          lexer = Lexer()
+          for ch in v:
+            lexer.feed(ch)
+          lexer.eof()
           transaction.guard = v
         elif k == 'action':
           actions = v.split('\n')

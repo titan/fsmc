@@ -32,12 +32,12 @@
 *** DONE verify event
 *** DONE verify transaction
 * exporter [33%]
-** INPROGRESS Python [66%]
+** INPROGRESS Python [83%]
 *** DONE basic framework
 *** DONE states
-*** DONE action delegate
-*** INPROGRESS guard delegate
-*** INPROGRESS variable delegate
+*** INPROGRESS action delegate
+*** DONE guard delegate
+*** DONE variable delegate
 *** DONE state machine
 ** DONE JSON [100%]
 *** DONE basic framework
@@ -51,14 +51,23 @@
 **** DONE Call
 **** DONE Assignment
 ** TODO Plantuml
-* semanticization [33%]
+* semanticization [40%]
 ** DONE model [100%]
 *** DONE Expression
 *** DONE Identifier
 *** DONE Literal
 *** DONE Call
 *** DONE Assignment
-** TODO Lexer [0%]
+** DONE Lexer [100%]
+*** DONE interface
+*** DONE context
+*** DONE fsm defination
+*** DONE guard delegate
+*** DONE action delegate
+*** DONE output delegate
+** INPROGRESS Syntaxer [0%]
+*** TODO interface
+*** TODO context
 *** TODO fsm defination
 *** TODO guard delegate
 *** TODO action delegate
