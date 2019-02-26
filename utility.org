@@ -9,9 +9,11 @@
   def normalize(string):
     mappings = {}
     #mappings['_'] = '_UNDERLINE_'
-    mappings['!='] = '_NOT_EQUALS_'
+    mappings['!='] = '_NOT_EQUAL_TO_'
     mappings[':='] = '_ASSIGN_TO_'
-    mappings['=='] = '_EQUALS_'
+    mappings['=='] = '_DOUBLE_EQUALS_'
+    mappings['>='] = '_GREATER_THAN_OR_EQUAL_TO_'
+    mappings['<='] = '_LESS_THAN_OR_EQUAL_TO_'
     mappings['='] = '_EQUALS_'
     mappings['+'] = '_PLUS_'
     mappings['-'] = '_MINUS_'

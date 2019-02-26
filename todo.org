@@ -56,9 +56,9 @@
 *** DONE export headers
 *** DONE export content
 * semanticization [40%]
-** DONE model [83%]
+** DONE model [100%]
 *** DONE Expression
-*** TODO Delimiter
+*** DONE Delimiter
 *** DONE Identifier
 *** DONE Literal
 *** DONE Call
@@ -70,12 +70,24 @@
 *** DONE guard delegate
 *** DONE action delegate
 *** DONE output delegate
-** INPROGRESS Syntaxer [0%]
+** INPROGRESS Event Syntaxer [0%]
 *** TODO interface
 *** TODO context
 *** TODO fsm defination
 *** TODO guard delegate
 *** TODO action delegate
 *** TODO output delegate
-** TODO guard
-** TODO action
+** INPROGRESS Guard Syntaxer [0%]
+*** TODO interface
+*** TODO context
+*** TODO fsm defination
+*** TODO guard delegate
+*** TODO action delegate
+*** TODO output delegate
+** INPROGRESS Action Syntaxer [0%]
+*** TODO interface
+*** TODO context
+*** TODO fsm defination
+*** TODO guard delegate
+*** TODO action delegate
+*** TODO output delegate

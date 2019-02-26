@@ -40,6 +40,8 @@
     headers = wx[1]
     for i in range(1, len(headers)):
       header = headers[i]
+      if not header.value:
+        continue
       guard = None
       parameters = []
       result = re.search('(.*)\((.*)\)\[(.*)\]', header.value)
