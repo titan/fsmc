@@ -31,7 +31,7 @@
 *** DONE verify parameter
 *** DONE verify event
 *** DONE verify transaction
-* exporter [33%]
+* exporter [50%]
 ** INPROGRESS Python [83%]
 *** DONE basic framework
 *** DONE states
@@ -51,9 +51,14 @@
 **** DONE Call
 **** DONE Assignment
 ** TODO Plantuml
+** DONE Excel [100%]
+*** DONE basic framework
+*** DONE export headers
+*** DONE export content
 * semanticization [40%]
-** DONE model [100%]
+** DONE model [83%]
 *** DONE Expression
+*** TODO Delimiter
 *** DONE Identifier
 *** DONE Literal
 *** DONE Call

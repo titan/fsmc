@@ -75,7 +75,7 @@
       return '%s(%s)' % (self.name, ', '.join([str(x) for x in self.parameters]))
 
     def __repr__(self):
-      return 'Event(%s: %s)' % (self.name, ', '.join(self.parameters))
+      return 'Event(%s: %s)' % (self.name, ', '.join([repr(x) for x in self.parameters]))
 #+end_src
 ** state
 #+begin_src python :noweb-ref state

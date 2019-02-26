@@ -22,6 +22,9 @@
   <<expression>>
 
 
+  <<delimiter>>
+
+
   <<identifier>>
 
 
@@ -170,6 +173,20 @@
     def __repr__(self):
       return 'LessThanOrEqualToExpression(%s, %s)' % (self.left, self.right)
 #+end_src
+*** Delimiter
+#+begin_src python :noweb-ref delimiter
+  class Delimiter:
+    name: str
+
+    def __init__(self, name: str = None):
+      self.name = name
+
+    def __str__(self):
+      return self.name
+
+    def __repr__(self):
+      return 'Delimiter(%s)' % self.name
+#+end_src
 *** Identifier
 #+begin_src python :noweb-ref identifier
   class Identifier:
@@ -227,17 +244,25 @@
 #+begin_src python :noweb-ref assignment
   class Assignment:
     target: Identifier
+    type: Identifier
     expression: Expression
 
-    def __init__(self, target: Identifier = None, expression: Expression = None):
+    def __init__(self, target: Identifier = None, type: Identifier = None, expression: Expression = None):
       self.target = target
+      self.type = type
       self.expression = expression
 
     def __str__(self):
-      return '%s = %s' % (str(self.target), str(self.expression))
+      if self.type:
+        return '%s : %s = %s' % (str(self.target), str(self.type), str(self.expression))
+      else:
+        return '%s = %s' % (str(self.target), str(self.expression))
 
     def __repr__(self):
-      return 'Assignment(%s: %s)' % (self.target, self.expression)
+      if self.type:
+        return 'Assignment(%s: %s = %s)' % (self.target, self.type, self.expression)
+      else:
+        return 'Assignment(%s = %s)' % (self.target, self.expression)
 #+end_src
 ** lexer
 *** framework
@@ -1245,10 +1270,10 @@
       return Literal(ch, 'char')
 
     def open_parenthesis(self, ctx):
-      return Identifier('(')
+      return Delimiter('(')
 
     def close_parenthesis(self, ctx):
-      return Identifier(')')
+      return Delimiter(')')
 #+end_src
 **** guard delegate
 #+begin_src python :noweb-ref lexer-guard-delegate

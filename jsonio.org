@@ -356,7 +356,7 @@
         if k == 'name':
           state.name = v
         elif k == 'transactions':
-          state.transactions = _parse_transactions(v)
+          state.transactions = _parse_transactions(v, variables)
         elif k == 'states':
           state.substates = _parse_states(v)
       states.append(state)
@@ -367,7 +367,7 @@
 #+end_src
 *** parse transactions
 #+begin_src python :noweb-ref parse-transactions
-  def _parse_transactions(data: Mapping[str, str]) -> List[Transaction]:
+  def _parse_transactions(data: Mapping[str, str], variables: List[Variable]) -> List[Transaction]:
     transactions = []
     for t in data:
       transaction = Transaction()
@@ -389,7 +389,16 @@
             if matched:
               varname = matched[1].strip()
               exp = matched[2].strip()
-              assignment = Assignment(Identifier(varname), exp)
+              found = False
+              for var in variables:
+                if var.name == varname:
+                  vartype = var.type
+                  found = True
+                  break
+              if not found:
+                print('var %s in "%s" not defined' % (varname, action))
+                exit(1)
+              assignment = Assignment(Identifier(varname), Identifier(vartype), exp)
               transaction.actions.append(assignment)
               continue
             matched = re.search('(.*)\((.*)\)', action)
@@ -489,7 +498,7 @@
           actions = []
           for action in obj.actions:
             if isinstance(action, Assignment):
-              actions.append(str(action))
+              actions.append('%s = %s' % (str(action.target), str(action.expression)))
             elif isinstance(action, Call):
               if len(action.operands) > 0:
                 actions.append(str(action))

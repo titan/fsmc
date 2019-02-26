@@ -118,7 +118,7 @@
       guardmappings = {}
       for transaction in transactions:
         if transaction.guard:
-          guardmappings[transaction.guard] = transaction
+          guardmappings[str(transaction.guard)] = transaction
       eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(event.name).lower(), ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
       if len(guardmappings) > 0:
         guards = [x for x in guardmappings.keys()]

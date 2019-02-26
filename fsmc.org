@@ -30,6 +30,9 @@
     'py': python.save,
     'python': python.save,
     'json': jsonio.save,
+    'excel': excel.save,
+    'xls': excel.save,
+    'xlsx': excel.save,
   }
 
   def main(args):

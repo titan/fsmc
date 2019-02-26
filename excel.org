@@ -2,17 +2,20 @@
 * Excel
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/excel.py
-  from typing import List, Mapping, Tuple
+  from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transaction, Variable
-  from semantic import Assignment, Call, Identifier
+  from semantic import Assignment, Call, Expression, Identifier
   import re
 
   <<importer>>
+
+  <<exporter>>
 #+end_src
 ** importer
 *** basic
 #+begin_src python :noweb-ref importer
   <<parse-events>>
+
   <<parse-states>>
 
   def load(src: str) -> List[Event]:
@@ -28,43 +31,51 @@
 *** parse events
 #+begin_src python :noweb-ref parse-events
   <<verify-parameter>>
+
   <<verify-event>>
+
   def _parse_events(wx) -> List[Tuple[Event, str]]:
+    uniqevents = {}
     events = []
     headers = wx[1]
     for i in range(1, len(headers)):
       header = headers[i]
-      event = Event()
       guard = None
       parameters = []
       result = re.search('(.*)\((.*)\)\[(.*)\]', header.value)
       if result:
-        event.name = result.group(1).strip()
+        eventname = result.group(1).strip()
         parameters = result.group(2).split(',')
         guard = result.group(3).strip()
       else:
         result = re.search('(.*)\((.*)\)', header.value)
         if result:
-          event.name = result.group(1).strip()
+          eventname = result.group(1).strip()
           parameters = result.group(2).split(',')
         else:
-          event.name = header.value.strip()
-      for parameter in parameters:
-        param = Parameter()
-        param_matched = re.search('(.*):(.*)=(.*)', parameter)
-        if param_matched:
-          param.name = param_matched.group(1).strip()
-          param.type = param_matched.group(2).strip()
-          param.default = param_matched.group(3).strip()
+          eventname = header.value.strip()
+      if eventname not in uniqevents:
+        event = Event()
+        event.name = eventname
+        for parameter in parameters:
+          param = Parameter()
+          param_matched = re.search('(.*):(.*)=(.*)', parameter)
+          if param_matched:
+            param.name = param_matched.group(1).strip()
+            param.type = param_matched.group(2).strip()
+            param.default = param_matched.group(3).strip()
+            event.parameters.append(_verify_parameter(param, header))
+            continue
+          param_matched = re.search('(.*):(.*)', parameter)
+          if param_matched:
+            param.name = param_matched.group(1).strip()
+            param.type = param_matched.group(2).strip()
+            event.parameters.append(_verify_parameter(param, header))
+            continue
           event.parameters.append(_verify_parameter(param, header))
-          continue
-        param_matched = re.search('(.*):(.*)', parameter)
-        if param_matched:
-          param.name = param_matched.group(1).strip()
-          param.type = param_matched.group(2).strip()
-          event.parameters.append(_verify_parameter(param, header))
-          continue
-        event.parameters.append(_verify_parameter(param, header))
+        uniqevents[eventname] = event
+      else:
+        event = uniqevents[eventname]
       events.append((_verify_event(event, header), guard))
     return events
 #+end_src
@@ -91,6 +102,7 @@
 *** parse states
 #+begin_src python :noweb-ref parse-states
   <<verify-transaction>>
+
   def _parse_states(wx, headers: List[Tuple[Event, str]]) -> List[State]:
     states = []
     variables = {}
@@ -121,7 +133,7 @@
                 exp = matched[3].strip()
                 var = Variable(varname, vartype)
                 variables[var.name] = var
-                assignment = Assignment(Identifier(varname), exp)
+                assignment = Assignment(Identifier(varname), Identifier(vartype), exp)
                 transaction.actions.append(assignment)
                 continue
               matched = re.search('(.*)\((.*)\)', line)
@@ -131,6 +143,8 @@
                 transaction.actions.append(call)
                 continue
               else:
+                if len(line) == 0:
+                  continue
                 call = Call(Identifier(line), [], None)
                 call._operandstrs = None
                 transaction.actions.append(call)
@@ -172,4 +186,90 @@
                 print('Undefined action arguments "%s" in action: %s' % (arg, action))
                 exit(1)
             action.operands = args
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<export-headers>>
+
+  <<export-content>>
+
+  def save(dst: str, variables: List[Variable], states: List[State]):
+    from openpyxl import Workbook
+    from openpyxl.styles import NamedStyle, Border, Side
+    import os.path
+    if dst.endswith('excel'):
+      dst = dst[:-5] + 'xlsx'
+
+    wb = Workbook(write_only = True)
+    ws = wb.create_sheet()
+    pairs = {}
+    idx = 0
+    for state in states:
+      for transaction in state.transactions:
+        event = transaction.event
+        key = str(event) + str(transaction.guard)
+        if key not in pairs:
+          pairs[str(event) + str(transaction.guard)] = (idx, event, transaction.guard)
+          idx += 1
+    headers = [x for x in pairs.values()]
+    headers.sort()
+    _export_headers(ws, headers)
+    rows = []
+    for state in states:
+      row = [state]
+      for (_, event, guard) in headers:
+        found = False
+        for transaction in state.transactions:
+          if event == transaction.event and (str(guard) == str(transaction.guard)):
+            row.append((transaction.target if transaction.target != state else None, transaction.actions))
+            found = True
+            break
+        if not found:
+          row.append((None, None))
+      rows.append(row)
+    _export_content(ws, rows)
+    wb.save(dst)
+#+end_src
+*** export headers
+#+begin_src python :noweb-ref export-headers
+  def _export_headers(ws, values: List[Tuple[int, Event, Expression]]):
+    headers = []
+    for (_, event, guard) in values:
+      header = ''
+      if len(event.parameters) > 0:
+        header += '%s(%s)' % (event.name, ', '.join(['%s: %s' % (x.name, x.type) for x in event.parameters]))
+      else:
+        header += '%s' % (event.name)
+      if guard:
+        header += '[%s]' % str(guard)
+      headers.append(header)
+    ws.append(['state\event'] + headers)
+#+end_src
+*** export content
+#+begin_src python :noweb-ref export-content
+  def _export_content(ws, values: List[List[Union[State, Tuple[State, List[Union[Assignment, Expression]]]]]]):
+    for line in values:
+      row = []
+      for cell in line:
+        if isinstance(cell, State):
+          row.append(cell.name)
+        elif isinstance(cell, tuple):
+          (state, actions) = cell
+          content = ''
+          if actions:
+            tmp = []
+            for x in actions:
+              if isinstance(x, Assignment):
+                tmp.append('%s: %s = %s' % (str(x.target), str(x.type), str(x.expression)))
+              else:
+                tmp.append(str(x).replace('()', ''))
+            content += '\n'.join(tmp)
+          content += '\n----\n'
+          if state:
+            content += state.name
+          if content == '\n----\n':
+            content = None
+          row.append(content)
+      ws.append(row)
 #+end_src
