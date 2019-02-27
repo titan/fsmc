@@ -5,6 +5,7 @@
   from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transaction, Variable
   from semantic import Assignment, Call, Expression, Identifier
+  from analyzer import Lexer, ParameterSyntaxer, ParameterLexerAdapter
   import re
 
   <<importer>>
@@ -47,34 +48,33 @@
       result = re.search('(.*)\((.*)\)\[(.*)\]', header.value)
       if result:
         eventname = result.group(1).strip()
-        parameters = result.group(2).split(',')
         guard = result.group(3).strip()
+
+        syntaxer = ParameterSyntaxer()
+        lexer = Lexer(ParameterLexerAdapter(syntaxer))
+        for ch in result.group(2):
+          lexer.feed(ch)
+        lexer.eof()
+        syntaxer.eof()
+        parameters = syntaxer.result()
       else:
         result = re.search('(.*)\((.*)\)', header.value)
         if result:
           eventname = result.group(1).strip()
-          parameters = result.group(2).split(',')
+          syntaxer = ParameterSyntaxer()
+          lexer = Lexer(ParameterLexerAdapter(syntaxer))
+          for ch in result.group(2):
+            lexer.feed(ch)
+          lexer.eof()
+          syntaxer.eof()
+          parameters = syntaxer.result()
         else:
           eventname = header.value.strip()
       if eventname not in uniqevents:
         event = Event()
         event.name = eventname
         for parameter in parameters:
-          param = Parameter()
-          param_matched = re.search('(.*):(.*)=(.*)', parameter)
-          if param_matched:
-            param.name = param_matched.group(1).strip()
-            param.type = param_matched.group(2).strip()
-            param.default = param_matched.group(3).strip()
-            event.parameters.append(_verify_parameter(param, header))
-            continue
-          param_matched = re.search('(.*):(.*)', parameter)
-          if param_matched:
-            param.name = param_matched.group(1).strip()
-            param.type = param_matched.group(2).strip()
-            event.parameters.append(_verify_parameter(param, header))
-            continue
-          event.parameters.append(_verify_parameter(param, header))
+          event.parameters.append(_verify_parameter(parameter, header))
         uniqevents[eventname] = event
       else:
         event = uniqevents[eventname]
@@ -108,8 +108,11 @@
   def _parse_states(wx, headers: List[Tuple[Event, str]]) -> List[State]:
     states = []
     variables = {}
-    for i in range(2, wx.max_row + 1):
-      row = wx[i]
+    isheader = True
+    for row in wx.rows:
+      if isheader:
+        isheader = False
+        continue
       state = State()
       if row[0].value.count('.') != 0:
         continue

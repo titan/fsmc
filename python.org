@@ -4,7 +4,8 @@
 #+begin_src python :tangle ${BUILDDIR}/python.py
   from typing import List, Mapping
   from model import Event, Parameter, State, Transaction, Variable
-  from semantic import Assignment, Call, Identifier, find_call_in_expression
+  from semantic import Assignment, Call, Identifier
+  from analyzer import find_call_in_expression
   from utility import normalize
 
   <<exporter>>
@@ -173,7 +174,7 @@
                   action = 'self.action_delegate.%s' % normalize(str(transaction.actions[0].operator).replace('-', ' ').replace('_', ' ' )).lower()
                   found_action = True
                 else:
-                  actionblock = str(transaction.actions[0])
+                  actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + str(transaction.actions[0])
                   if actionblock not in actionblocks:
                     action = 'self._action_block_%d' % actionblockid
                     actionblocks[actionblock] = (action, False)
@@ -186,7 +187,7 @@
                 action = 'None'
                 found_action = True
             else:
-              actionblock = '\n'.join([str(x) for x in transaction.actions])
+              actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
               if actionblock not in actionblocks:
                 action = 'self._action_block_%d' % actionblockid
                 actionblocks[actionblock] = (action, False)
@@ -215,7 +216,7 @@
               continue
           else:
             continue
-        actionblock = '\n'.join([str(x) for x in transaction.actions])
+        actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
         (action, generated) = actionblocks[actionblock]
         actionfun = action.replace('self.', '')
         if generated:

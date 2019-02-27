@@ -10,8 +10,8 @@
 *** DONE Variable
 ** DONE Build system
 ** DONE Framework
-* importer [66%]
-** DONE JSON [100%]
+* importer [0%]
+** INPROGRESS JSON [75%]
 *** DONE basic framework
 *** DONE parse events
 *** DONE parse variables
@@ -21,8 +21,11 @@
 *** DONE verify event
 *** DONE verify variable
 *** DONE verify transaction
+*** TODO apply parameter syntaxer
+*** TODO apply guard syntaxer
+*** TODO apply action syntaxer
 ** TODO Plantuml
-** DONE Excel [100%]
+** INPROGRESS Excel [81%]
 *** DONE basic framework
 *** DONE parse variables
 *** DONE parse events
@@ -31,8 +34,11 @@
 *** DONE verify parameter
 *** DONE verify event
 *** DONE verify transaction
+*** DONE apply parameter syntaxer
+*** TODO apply guard syntaxer
+*** TODO apply action syntaxer
 * exporter [50%]
-** INPROGRESS Python [83%]
+** INPROGRESS Python [85%]
 *** DONE basic framework
 *** DONE states
 *** INPROGRESS action delegate
@@ -55,7 +61,7 @@
 *** DONE basic framework
 *** DONE export headers
 *** DONE export content
-* semanticization [40%]
+* semanticization [60%]
 ** DONE model [100%]
 *** DONE Expression
 *** DONE Delimiter
@@ -70,21 +76,21 @@
 *** DONE guard delegate
 *** DONE action delegate
 *** DONE output delegate
-** INPROGRESS Event Syntaxer [0%]
+** DONE Parameter Syntaxer [100%]
+*** DONE interface
+*** DONE context
+*** DONE fsm defination
+*** DONE guard delegate
+*** DONE action delegate
+*** DONE output delegate
+** TODO Guard Syntaxer [0%]
 *** TODO interface
 *** TODO context
 *** TODO fsm defination
 *** TODO guard delegate
 *** TODO action delegate
 *** TODO output delegate
-** INPROGRESS Guard Syntaxer [0%]
-*** TODO interface
-*** TODO context
-*** TODO fsm defination
-*** TODO guard delegate
-*** TODO action delegate
-*** TODO output delegate
-** INPROGRESS Action Syntaxer [0%]
+** TODO Action Syntaxer [0%]
 *** TODO interface
 *** TODO context
 *** TODO fsm defination
