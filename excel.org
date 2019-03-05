@@ -119,6 +119,7 @@
       state.name = row[0].value
       for j in range(1, len(row)):
         transaction = Transaction()
+        transaction._targetstrs = []
         transaction._targetstr = None
         cell = row[j]
         if cell.value:
@@ -154,7 +155,9 @@
                 call._operandstrs = None
                 transaction.actions.append(call)
             else:
-              transaction._targetstr = line
+              transaction._targetstrs.append(line)
+          if len(transaction._targetstrs) > 0:
+            transaction._targetstr = '\n'.join(transaction._targetstrs)
           state.transactions.append(transaction)
       states.append(state)
     for state in states:

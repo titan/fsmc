@@ -31,6 +31,7 @@
     mappings['"'] = '_DOUBLE_QUOTES_'
     mappings["'"] = '_APOSTROPHE_'
     mappings['.'] = '_DOT_'
+    mappings['·'] = '_MIDDOT_'
     mappings['?'] = '_QUESTION_'
     mappings['%'] = '_PERCENT_'
     mappings[' '] = '_'

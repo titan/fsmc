@@ -3379,6 +3379,28 @@
 
   <<parameter-adapter>>
 #+end_src
+*** bnf
+#+begin_src text
+  target = parameters $$
+
+  parameters = parameters , parameter
+             | parameter
+
+  parameter = var : type
+
+  var = identifier
+
+  type = union_type
+       | list_type
+       | map_type
+       | identifier
+
+  union_type = union_type "|" type
+
+  list_type = [ type ]
+
+  map_type = { type : type }
+#+end_src
 *** fsm defination
 #+begin_src json :tangle ${BUILDDIR}/parameter-fsm.json
   {
@@ -3824,6 +3846,59 @@
         self._syntaxer.other()
 #+end_src
 
+** guard syntaxer
+#+begin_src text
+  guard = bool-expression
+
+  bool-expression = bool-expression bool-op expression
+                  | negative-expression
+                  | compare-expression
+                  | expression
+
+  negative-expression = not bool-expression
+
+  compare-expression = expression cmp expression
+
+  expression = call
+             | literal
+             | identifier
+
+  call = identifier ( operands )
+
+  operands = empty
+           | expression
+           | operands , expression
+
+  bool-op = and
+          | or
+
+  cmp = ==
+      | !=
+      | >
+      | >=
+      | <
+      | <=
+#+end_src
+** action syntaxer
+#+begin_src text
+  action = assignment
+         | call
+
+  assignment = identifier : identifier = call
+             | identifier = call
+
+  call = fun ( operands )
+       | fun ( )
+       | fun
+
+  fun = fun identifier
+      | identifier
+
+  operands = literal
+           | identifier
+           | operands , literal
+           | operands , identifier
+#+end_src
 ** utility
 *** framework
 #+begin_src python :noweb-ref utility
