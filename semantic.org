@@ -20,6 +20,21 @@
 
 
   <<assignment>>
+
+
+  <<var>>
+
+
+  <<type>>
+
+
+  <<union-type>>
+
+
+  <<list-type>>
+
+
+  <<map-type>>
 #+end_src
 ** Expression
 #+begin_src python :noweb-ref expression
@@ -248,4 +263,61 @@
         return 'Assignment(%s: %s = %s)' % (self.target, self.type, self.expression)
       else:
         return 'Assignment(%s = %s)' % (self.target, self.expression)
+#+end_src
+
+** Var
+#+begin_src python :noweb-ref var
+  class Var:
+    name: Identifier
+
+    def __init__(self, name: Identifier = None):
+      self.name = name
+
+    def __str__(self):
+      return str(self.name)
+#+end_src
+
+** Type
+#+begin_src python :noweb-ref type
+  class Type:
+    kind: int
+
+    def __init__(self, kind: int = 0, type = None):
+      self.kind = kind
+      self.type = type
+#+end_src
+
+** UnionType
+#+begin_src python :noweb-ref union-type
+  class UnionType():
+    kind: int
+    types: List[Type]
+
+    def __init__(self):
+      self.kind = 1
+      self.types = []
+#+end_src
+
+** ListType
+#+begin_src python :noweb-ref list-type
+  class ListType():
+    kind: int
+    type: Type
+
+    def __init__(self, type: Type = None):
+      self.kind = 2
+      self.type = type
+#+end_src
+
+** MapType
+#+begin_src python :noweb-ref map-type
+  class MapType(Type):
+    kind: int
+    keytype: Type
+    valtype: Type
+
+    def __init__(self, keytype: Type = None, valtype: Type = None):
+      self.kind = 3
+      self.keytype = keytype
+      self.valtype = valtype
 #+end_src

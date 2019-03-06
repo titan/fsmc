@@ -15,6 +15,7 @@
 * Core Logic
 ** Framework
 #+begin_src python :tangle ${BUILDDIR}/fsmc.py
+  #! /usr/bin/python
   import jsonio
   import python
   import excel

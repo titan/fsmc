@@ -10,6 +10,7 @@ vpath %.py $(BUILDDIR)
 vpath %.json $(BUILDDIR)
 
 all: $(TARGET) $(FSM)
+	chmod 755 $(BUILDDIR)/fsmc.py
 
 $(TARGET): %.py: %.org
 	sed 's/$$$\{BUILDDIR}/$(ESCAPED_BUILDDIR)/g' $< | org-tangle -

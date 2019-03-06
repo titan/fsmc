@@ -73,8 +73,6 @@
                 parameter.name = vv
               elif kk == 'type':
                 parameter.type = vv
-              elif kk == 'default':
-                parameter.default = vv
             event.parameters.append(_verify_parameter(parameter, p))
       events.append(_verify_event(event, e))
     return events

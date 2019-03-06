@@ -34,6 +34,7 @@
     mappings['·'] = '_MIDDOT_'
     mappings['?'] = '_QUESTION_'
     mappings['%'] = '_PERCENT_'
+    mappings['$'] = '_DOLLAR_'
     mappings[' '] = '_'
     mappings['\n'] = '_NEWLINE_'
     mappings['#'] = '_SHARP_'

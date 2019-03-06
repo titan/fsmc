@@ -4,7 +4,7 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/model.py
   from typing import List, NewType, Union
-  from semantic import Assignment, Call
+  from semantic import Assignment, Call, Identifier, Type
 
 
   <<parameter>>
@@ -26,23 +26,18 @@
 ** parameter
 #+begin_src python :noweb-ref parameter
   class Parameter:
-    name: str
-    type: str
-    default: str
+    name: Identifier
+    type: Type
 
-    def __init__(self, name: str = None, type: str = None):
+    def __init__(self, name: Identifier = None, type: Type = None):
       self.name = name
       self.type = type
-      self.default = None
 
     def __str__(self):
-      if self.default:
-        return '%s: %s = %s' % (self.name, self.type, self.default)
-      else:
-        return '%s: %s' % (self.name, self.type)
+      return '%s: %s' % (self.name, self.type)
 
     def __repr__(self):
-      return 'Parameter(name: %s, type: %s, default: %s)' % (self.name, self.type, self.default)
+      return 'Parameter(name: %s, type: %s)' % (self.name, self.type)
 #+end_src
 
 ** variable

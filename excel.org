@@ -186,7 +186,7 @@
             for arg in action._operandstrs:
               found: bool = False
               for param in t.event.parameters:
-                if arg == param.name:
+                if arg == str(param.name):
                   args.append(Identifier(arg))
                   found = True
                   break

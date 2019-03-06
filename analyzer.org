@@ -9,7 +9,7 @@
   from lexer_fsm import ActionDelegate as LexerActionDelegate, GuardDelegate as LexerGuardDelegate, VariableDelegate as LexerVariableDelegate, StateMachine as LexerStateMachine
   from parameter_fsm import ActionDelegate as ParameterActionDelegate, GuardDelegate as ParameterGuardDelegate, VariableDelegate as ParameterVariableDelegate, StateMachine as ParameterStateMachine
   from model import Parameter
-  from semantic import Expression, Assignment, Identifier, Delimiter, Call, AndExpression, OrExpression, NotExpression, EqualsExpression, NotEqualToExpression, LessThanExpression, LessThanOrEqualToExpression, GreaterThanExpression, GreaterThanOrEqualToExpression
+  from semantic import Expression, Assignment, Identifier, Delimiter, Call, AndExpression, OrExpression, NotExpression, EqualsExpression, NotEqualToExpression, LessThanExpression, LessThanOrEqualToExpression, GreaterThanExpression, GreaterThanOrEqualToExpression, Var, Type, UnionType, ListType, MapType
 
 
   <<utility>>
@@ -3359,22 +3359,65 @@
 
     def __init__(self):
       self._fsm = ParameterStateMachine(_ParameterActionDelegate(), None, None)
-      self._ctx = _ParameterContext()
+      self._ctx = _ParameterContext(self._fsm)
 
-    def identifier(self, name):
-      self._fsm.identifier(self._ctx, name)
+    def identifier(self, id):
+      self._consume_queue()
+      self._fsm.identifier(self._ctx, id)
+      self._consume_queue()
 
-    def delimiter(self, name):
-      self._fsm.delimiter(self._ctx, name)
-
-    def other(self):
-      self._fsm.other(self._ctx)
+    def delimiter(self, d):
+      self._consume_queue()
+      self._fsm.delimiter(self._ctx, d)
+      self._consume_queue()
 
     def eof(self):
-      self._fsm.eof(self._ctx)
+      self._consume_queue()
+      self._fsm.eof(self._ctx, 0)
+      self._consume_queue()
 
     def result(self):
       return self._ctx.parameters
+
+    def _consume_queue(self):
+      while len(self._ctx.queue) > 0:
+        n = self._ctx.queue[0]
+        self._ctx.queue = self._ctx.queue[1:]
+        if isinstance(n, Var):
+          self._fsm.var(self._ctx, n)
+        elif isinstance(n, Type):
+          self._fsm.type(self._ctx, n)
+        elif isinstance(n, UnionType):
+          self._fsm.union_type(self._ctx, n)
+        elif isinstance(n, ListType):
+          self._fsm.list_type(self._ctx, n)
+        elif isinstance(n, MapType):
+          self._fsm.map_type(self._ctx, n)
+        elif isinstance(n, Parameter):
+          self._fsm.parameter(self._ctx, n)
+        elif isinstance(n, list):
+          self._fsm.parameters(self._ctx, n)
+        elif isinstance(n, int):
+          self._fsm.eof(self._ctx, n)
+      while len(self._ctx.delay_queue) > 0:
+        n = self._ctx.delay_queue[0]
+        self._ctx.delay_queue = self._ctx.delay_queue[1:]
+        if isinstance(n, Var):
+          self._fsm.var(self._ctx, n)
+        elif isinstance(n, Type):
+          self._fsm.type(self._ctx, n)
+        elif isinstance(n, UnionType):
+          self._fsm.union_type(self._ctx, n)
+        elif isinstance(n, ListType):
+          self._fsm.list_type(self._ctx, n)
+        elif isinstance(n, MapType):
+          self._fsm.map_type(self._ctx, n)
+        elif isinstance(n, Parameter):
+          self._fsm.parameter(self._ctx, n)
+        elif isinstance(n, list):
+          self._fsm.parameters(self._ctx, n)
+        elif isinstance(n, int):
+          self._fsm.eof(self._ctx, n)
 
 
   <<parameter-adapter>>
@@ -3390,16 +3433,21 @@
 
   var = identifier
 
-  type = union_type
-       | list_type
-       | map_type
-       | identifier
+  type = common-type
+       | union-type
 
-  union_type = union_type "|" type
+  common-type = identifier
+              | container-type
 
-  list_type = [ type ]
+  container-type = list-type
+                 | map-type
 
-  map_type = { type : type }
+  union-type = common-type "|" common-type
+             | union-type "|" common-type
+
+  list-type = [ type ]
+
+  map-type = { type : type }
 #+end_src
 *** fsm defination
 #+begin_src json :tangle ${BUILDDIR}/parameter-fsm.json
@@ -3410,8 +3458,8 @@
         "name": "identifier",
         "parameters": [
           {
-            "name": "name",
-            "type": "str"
+            "name": "id",
+            "type": "identifier"
           }
         ]
       },
@@ -3419,344 +3467,226 @@
         "name": "delimiter",
         "parameters": [
           {
-            "name": "name",
-            "type": "str"
-          }
-        ]
-      },
-      {
-        "name": "other"
-      },
-      {
-        "name": "eof"
-      }
-    ],
-    "states": [
-      {
-        "name": "init",
-        "transactions": [
-          {
-            "actions": [
-              "set var(name)"
-            ],
-            "event": "identifier",
-            "target": "var"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "eof",
-            "target": "init"
-          }
-        ]
-      },
-      {
-        "name": "var",
-        "transactions": [
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "identifier",
-            "target": "init"
-          },
-          {
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "var :"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "eof",
-            "target": "init"
-          }
-        ]
-      },
-      {
-        "name": "var :",
-        "transactions": [
-          {
-            "actions": [
-              "set type(name)"
-            ],
-            "event": "identifier",
-            "target": "var : type"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "eof",
-            "target": "init"
-          }
-        ]
-      },
-      {
-        "name": "var : type",
-        "transactions": [
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "identifier",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "append"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "parameters"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "append"
-            ],
-            "event": "eof",
-            "target": "init"
+            "name": "d",
+            "type": "delimiter"
           }
         ]
       },
       {
         "name": "parameters",
-        "transactions": [
+        "parameters": [
           {
-            "actions": [
-              "set var(name)"
-            ],
-            "event": "identifier",
-            "target": "parameters var"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "eof",
-            "target": "init"
+            "name": "ps",
+            "type": "parameters"
           }
         ]
       },
       {
-        "name": "parameters var",
-        "transactions": [
+        "name": "parameter",
+        "parameters": [
           {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "identifier",
-            "target": "init"
-          },
-          {
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "parameters var :"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "eof",
-            "target": "init"
+            "name": "p",
+            "type": "parameter"
           }
         ]
       },
       {
-        "name": "parameters var :",
-        "transactions": [
+        "name": "var",
+        "parameters": [
           {
-            "actions": [
-              "set type(name)"
-            ],
-            "event": "identifier",
-            "target": "parameters var : type"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "other",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "syntax error",
-              "quit"
-            ],
-            "event": "eof",
-            "target": "init"
+            "name": "v",
+            "type": "var"
           }
         ]
       },
       {
-        "name": "parameters var : type",
+        "name": "type",
+        "parameters": [
+          {
+            "name": "t",
+            "type": "type"
+          }
+        ]
+      },
+      {
+        "name": "union_type",
+        "parameters": [
+          {
+            "name": "ut",
+            "type": "uniontype"
+          }
+        ]
+      },
+      {
+        "name": "list_type",
+        "parameters": [
+          {
+            "name": "lt",
+            "type": "listtype"
+          }
+        ]
+      },
+      {
+        "name": "map_type",
+        "parameters": [
+          {
+            "name": "mt",
+            "type": "maptype"
+          }
+        ]
+      },
+      {
+        "name": "eof",
+        "parameters": [
+          {
+            "name": "e",
+            "type": "int"
+          }
+        ]
+      }
+    ],
+    "states": [
+      {
+        "name": "target -> \u00b7 parameters $$\nparameters -> \u00b7 parameters , parameter\nparameters -> \u00b7 parameter\nparameter -> \u00b7 var : type\nvar -> \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to var"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "shift(ps)"
+            ],
+            "event": "parameters",
+            "target": "target -> parameters \u00b7 $$\nparameters -> parameters \u00b7 , parameter"
+          },
+          {
+            "actions": [
+              "shift(p)",
+              "reduce 1 to parameters"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "shift(v)"
+            ],
+            "event": "var",
+            "target": "parameter -> var \u00b7 : type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "target -> parameters \u00b7 $$\nparameters -> parameters \u00b7 , parameter",
         "transactions": [
           {
             "actions": [
               "syntax error",
               "quit"
             ],
-            "event": "identifier",
-            "target": "init"
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','",
+            "target": "parameters -> parameters , \u00b7 parameter\nparameter -> \u00b7 var : type\nvar -> \u00b7 identifier"
           },
           {
             "actions": [
@@ -3764,31 +3694,1452 @@
               "quit"
             ],
             "event": "delimiter",
-            "guard": "name == ':'",
-            "target": "init"
-          },
-          {
-            "actions": [
-              "append"
-            ],
-            "event": "delimiter",
-            "guard": "name == ','",
-            "target": "parameters"
+            "guard": "d.name == ':'"
           },
           {
             "actions": [
               "syntax error",
               "quit"
             ],
-            "event": "other",
-            "target": "init"
+            "event": "delimiter",
+            "guard": "d.name == '|'"
           },
           {
             "actions": [
-              "append"
+              "syntax error",
+              "quit"
             ],
-            "event": "eof",
-            "target": "init"
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce to target"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "parameters -> parameters , \u00b7 parameter\nparameter -> \u00b7 var : type\nvar -> \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to var"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "shift(p)",
+              "reduce 2 to parameters"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "shift(v)"
+            ],
+            "event": "var",
+            "target": "parameter -> var \u00b7 : type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "parameter -> var \u00b7 : type",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'",
+            "target": "parameter -> var : \u00b7 type\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "parameter -> var : \u00b7 type\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to type"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['",
+            "target": "list_type -> [ \u00b7 type ]\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'",
+            "target": "map_type -> { \u00b7 type : type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "shift(t)"
+            ],
+            "event": "type",
+            "target": "parameter -> var : type \u00b7\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier"
+          },
+          {
+            "actions": [
+              "shift(ut)",
+              "reduce to type"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "shift(lt)",
+              "reduce to type"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "shift(mt)",
+              "reduce to type"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "parameter -> var : type \u00b7\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier",
+        "transactions": [
+          {
+            "actions": [
+              "reduce to parameter",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'",
+            "target": "union_type -> type | \u00b7 list_type\nunion_type -> type | \u00b7 map_type\nunion_type -> type | \u00b7 identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "reduce to parameter",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "union_type -> type | \u00b7 list_type\nunion_type -> type | \u00b7 map_type\nunion_type -> type | \u00b7 identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to union_type"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['",
+            "target": "list_type -> [ \u00b7 type ]\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "shift(lt)",
+              "reduce to union_type"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "shift(mt)",
+              "reduce to union_type"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "list_type -> [ \u00b7 type ]\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to type"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['",
+            "target": "list_type -> [ \u00b7 type ]\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'",
+            "target": "map_type -> { \u00b7 type : type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "shift(t)"
+            ],
+            "event": "type",
+            "target": "list_type -> [ type \u00b7 ]\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier"
+          },
+          {
+            "actions": [
+              "shift(ut)",
+              "reduce to type"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "shift(lt)",
+              "reduce to type"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "shift(mt)",
+              "reduce to type"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "list_type -> [ type \u00b7 ]\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'",
+            "target": "union_type -> type | \u00b7 list_type\nunion_type -> type | \u00b7 map_type\nunion_type -> type | \u00b7 identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce to list_type"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "map_type -> { \u00b7 type : type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to type"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['",
+            "target": "list_type -> [ \u00b7 type ]\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'",
+            "target": "map_type -> { \u00b7 type : type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "shift(t)"
+            ],
+            "event": "type",
+            "target": "map_type -> { type \u00b7 : type }\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier"
+          },
+          {
+            "actions": [
+              "shift(ut)",
+              "reduce to type"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "shift(lt)",
+              "reduce to type"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "shift(mt)",
+              "reduce to type"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "map_type -> { type \u00b7 : type }\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'",
+            "target": "map_type -> { type : \u00b7 type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'",
+            "target": "union_type -> type | \u00b7 list_type\nunion_type -> type | \u00b7 map_type\nunion_type -> type | \u00b7 identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "map_type -> { type : \u00b7 type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }",
+        "transactions": [
+          {
+            "actions": [
+              "shift(id)",
+              "reduce to type"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['",
+            "target": "list_type -> [ \u00b7 type ]\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'",
+            "target": "map_type -> { \u00b7 type : type }\ntype -> \u00b7 union_type\ntype -> \u00b7 list_type\ntype -> \u00b7 map_type\ntype -> \u00b7 identifier\nunion_type -> \u00b7 type | list_type\nunion_type -> \u00b7 type | map_type\nunion_type -> \u00b7 type | identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "shift(t)"
+            ],
+            "event": "type",
+            "target": "map_type -> { type : type \u00b7 }\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier"
+          },
+          {
+            "actions": [
+              "shift(ut)",
+              "reduce to type"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "shift(lt)",
+              "reduce to type"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "shift(mt)",
+              "reduce to type"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "map_type -> { type : type \u00b7 }\nunion_type -> type \u00b7 | list_type\nunion_type -> type \u00b7 | map_type\nunion_type -> type \u00b7 | identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '|'",
+            "target": "union_type -> type | \u00b7 list_type\nunion_type -> type | \u00b7 map_type\nunion_type -> type | \u00b7 identifier\nlist_type -> \u00b7 [ type ]\nmap_type -> \u00b7 { type : type }"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '['"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ']'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '{'"
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce to map_type"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '}'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameters"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "parameter"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "var"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "union_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "list_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "map_type"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
           }
         ]
       }
@@ -3798,37 +5149,118 @@
 *** context
 #+begin_src python :noweb-ref parameter-context
   class _ParameterContext:
-    var: str
-    type: str
     parameters: List[Parameter]
-    buffer: List[str]
 
-    def __init__(self):
-      self.var = None
-      self.type = None
+    def __init__(self, fsm = None):
+      self.fsm = fsm
+      self.queue = []
+      self.delay_queue = []
+      self.state_stack = []
+      self.stack = []
       self.parameters = []
 #+end_src
 *** delegate
 #+begin_src python :noweb-ref parameter-delegate
   class _ParameterActionDelegate(ParameterActionDelegate):
 
-    def set_var(self, ctx, name):
-      ctx.var = name
+    def shift(self, ctx, d):
+      ctx.state_stack.append(ctx.fsm.state)
+      ctx.stack.append(d)
+
+    def reduce_to_var(self, ctx):
+      var = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.queue.append(Var(var))
 
     def syntax_error(self, ctx):
       print("syntax error in parameter syntaxer")
 
     def quit(self, ctx):
-      exit(-1)
+      exit(1)
 
-    def set_type(self, ctx, name):
-      ctx.type = name
+    def reduce_1_to_parameters(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      parameter = ctx.stack.pop()
+      parameters = [ parameter ]
+      ctx.queue.append(parameters)
 
-    def append(self, ctx):
-      param = Parameter()
-      param.name = ctx.var
-      param.type = ctx.type
-      ctx.parameters.append(param)
+    def reduce_2_to_parameters(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      parameter = ctx.stack.pop()
+      parameters = ctx.stack.pop()
+      parameters.append(parameter)
+      ctx.queue.append(parameters)
+
+    def reduce_to_target(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      parameters = ctx.stack.pop()
+      if isinstance(parameters, list):
+        ctx.parameters = parameters
+      else:
+        ctx.parameters.append(parameters)
+
+    def reduce_to_type(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      type = ctx.stack.pop()
+      if isinstance(type, Identifier):
+        t = Type(0, type)
+      else:
+        t = Type(type.kind, type)
+      ctx.queue.append(t)
+
+    def reduce_to_parameter(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      type = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      var = ctx.stack.pop()
+      parameter = Parameter(var, type)
+      ctx.queue.append(parameter)
+
+    def enqueue(self, ctx, e):
+      ctx.delay_queue.append(e)
+
+    def reduce_to_union_type(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      a = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      b = ctx.stack.pop()
+      if isinstance(b, UnionType):
+        b.types.append(a)
+        ctx.queue.append(b)
+      else:
+        u = UnionType()
+        u.types.append(b)
+        u.types.append(a)
+        ctx.queue.append(u)
+
+    def reduce_to_list_type(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      type = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.queue.append(ListType(type))
+
+    def reduce_to_map_type(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      valtype = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      keytype = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.queue.append(MapType(keytype, valtype))
 #+end_src
 *** lex adapter
 #+begin_src python :noweb-ref parameter-adapter
@@ -3839,11 +5271,12 @@
 
     def on_call(self, token):
       if isinstance(token, Identifier):
-        self._syntaxer.identifier(token.name)
+        self._syntaxer.identifier(token)
       elif isinstance(token, Delimiter):
-        self._syntaxer.delimiter(token.name)
+        self._syntaxer.delimiter(token)
       else:
-        self._syntaxer.other()
+        print('Unknown token in parameter lexer adapter: %s' % (repr(token)))
+        exit(1)
 #+end_src
 
 ** guard syntaxer

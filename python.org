@@ -120,7 +120,7 @@
       for transaction in transactions:
         if transaction.guard:
           guardmappings[str(transaction.guard)] = transaction
-      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(event.name).lower(), ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(event.name).lower(), ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
       if len(guardmappings) > 0:
         guards = [x for x in guardmappings.keys()]
         for i in range(len(guards)):
@@ -129,13 +129,13 @@
           eventimpl += ' ' * 4 + ('el' if i != 0 else '') + 'if %s:\n' % guard
           event_tag = normalize(event.name) + '_' + normalize(guard)
           eventimpl += ' ' * 6 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 8 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+          eventimpl += ' ' * 8 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
           eventimpl += ' ' * 6 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
           extended_events[event_tag] = None
       else:
         event_tag = normalize(event.name)
         eventimpl += ' ' * 4 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-        eventimpl += ' ' * 6 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [x.name.lower() for x in event.parameters]))
+        eventimpl += ' ' * 6 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
         eventimpl += ' ' * 4 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
         extended_events[event_tag] = None
       eventimpl += '\n'
@@ -169,12 +169,12 @@
             elif len(transaction.actions) == 1:
               if isinstance(transaction.actions[0], Call):
                 args = ''.join([str(x) for x in transaction.actions[0].operands])
-                params = ''.join([x.name for x in transaction.event.parameters])
+                params = ''.join([str(x.name) for x in transaction.event.parameters])
                 if args == params:
                   action = 'self.action_delegate.%s' % normalize(str(transaction.actions[0].operator).replace('-', ' ').replace('_', ' ' )).lower()
                   found_action = True
                 else:
-                  actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + str(transaction.actions[0])
+                  actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transaction.event.parameters]) + '\n' + str(transaction.actions[0])
                   if actionblock not in actionblocks:
                     action = 'self._action_block_%d' % actionblockid
                     actionblocks[actionblock] = (action, False)
@@ -211,7 +211,7 @@
         elif len(transaction.actions) == 1:
           if isinstance(transaction.actions[0], Call):
             args = ''.join([str(x) for x in transaction.actions[0].operands])
-            params = ''.join([x.name for x in transaction.event.parameters])
+            params = ''.join([str(x.name) for x in transaction.event.parameters])
             if args == params:
               continue
           else:
@@ -222,7 +222,7 @@
         if generated:
           continue
         actionblocks[actionblock] = (action, True)
-        actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [x.name.lower() for x in transaction.event.parameters]))
+        actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [str(x.name).lower() for x in transaction.event.parameters]))
         for action in transaction.actions:
           if isinstance(action, Call):
             actionimpl += ' ' * 6 + 'self.action_delegate.%s(%s)\n' % (normalize(str(action.operator).replace('-', ' ').replace('_', ' ')).lower(), ', '.join(['ctx'] + [str(x) for x in action.operands]))
