@@ -5,7 +5,8 @@
   from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transaction, Variable
   from semantic import Assignment, Call, Expression, Identifier
-  from analyzer import Lexer, ParameterSyntaxer, ParameterLexerAdapter
+  from analyzer import ParameterSyntaxer, ParameterLexerAdapter
+  from lexer import Lexer
   import re
 
   <<importer>>
