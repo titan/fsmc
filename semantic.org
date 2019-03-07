@@ -285,6 +285,9 @@
     def __init__(self, kind: int = 0, type = None):
       self.kind = kind
       self.type = type
+
+    def __str__(self):
+      return str(self.type)
 #+end_src
 
 ** UnionType
@@ -296,6 +299,9 @@
     def __init__(self):
       self.kind = 1
       self.types = []
+
+    def __str__(self):
+      return ' | '.join([str(x) for x in self.types])
 #+end_src
 
 ** ListType
@@ -307,6 +313,9 @@
     def __init__(self, type: Type = None):
       self.kind = 2
       self.type = type
+
+    def __str__(self):
+      return '[%s]' % str(self.type)
 #+end_src
 
 ** MapType
@@ -320,4 +329,7 @@
       self.kind = 3
       self.keytype = keytype
       self.valtype = valtype
+
+    def __str__(self):
+      return '{%s: %s}' % (str(self.keytype), str(self.valtype))
 #+end_src

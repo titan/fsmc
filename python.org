@@ -183,6 +183,16 @@
                   else:
                     (action, _) = actionblocks[actionblock]
                     found_action = True
+              elif isinstance(transaction.actions[0], Assignment):
+                actionblock = str(transaction.actions[0])
+                if actionblock not in actionblocks:
+                  action = 'self._action_block_%d' % actionblockid
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
               else:
                 action = 'None'
                 found_action = True
@@ -214,13 +224,17 @@
             params = ''.join([str(x.name) for x in transaction.event.parameters])
             if args == params:
               continue
+            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
+          elif isinstance(transaction.actions[0], Assignment):
+            actionblock = str(transaction.actions[0])
           else:
             continue
-        actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
+        else:
+          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
         (action, generated) = actionblocks[actionblock]
-        actionfun = action.replace('self.', '')
         if generated:
           continue
+        actionfun = action.replace('self.', '')
         actionblocks[actionblock] = (action, True)
         actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [str(x.name).lower() for x in transaction.event.parameters]))
         for action in transaction.actions:

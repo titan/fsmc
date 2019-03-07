@@ -235,9 +235,7 @@
           data['parameters'] = obj.parameters
         return data
       if isinstance(obj, Parameter):
-        data = { 'name': obj.name, 'type': obj.type }
-        if obj.default:
-          data['default'] = obj.default
+        data = { 'name': str(obj.name), 'type': str(obj.type) }
         return data
       if isinstance(obj, State):
         return { 'name': obj.name, 'transactions': obj.transactions }
