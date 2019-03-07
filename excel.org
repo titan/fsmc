@@ -5,7 +5,7 @@
   from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transaction, Variable
   from semantic import Assignment, Call, Expression, Identifier
-  from analyzer import ParameterSyntaxer, ParameterLexerAdapter
+  from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter
   from lexer import Lexer
   import re
 
@@ -133,28 +133,15 @@
               state_mode = True
               continue
             if not state_mode:
-              matched = re.search('(.*):(.*)=(.*)', line)
-              if matched:
-                varname = matched[1].strip()
-                vartype = matched[2].strip()
-                exp = matched[3].strip()
-                var = Variable(varname, vartype)
-                variables[var.name] = var
-                assignment = Assignment(Identifier(varname), Identifier(vartype), exp)
-                transaction.actions.append(assignment)
+              if len(line) == 0:
                 continue
-              matched = re.search('(.*)\((.*)\)', line)
-              if matched:
-                call = Call(Identifier(matched[1].strip()), [], None)
-                call._operandstrs = [x.strip() for x in matched[2].split(',')]
-                transaction.actions.append(call)
-                continue
-              else:
-                if len(line) == 0:
-                  continue
-                call = Call(Identifier(line), [], None)
-                call._operandstrs = None
-                transaction.actions.append(call)
+              syntaxer = ActionSyntaxer()
+              lexer = Lexer(ActionLexerAdapter(syntaxer))
+              for ch in line:
+                lexer.feed(ch)
+              lexer.eof()
+              syntaxer.eof()
+              transaction.actions.append(syntaxer.result())
             else:
               transaction._targetstrs.append(line)
           if len(transaction._targetstrs) > 0:
@@ -182,19 +169,15 @@
         if isinstance(action, Assignment):
           pass
         elif isinstance(action, Call):
-          if action._operandstrs:
-            args = []
-            for arg in action._operandstrs:
-              found: bool = False
-              for param in t.event.parameters:
-                if arg == str(param.name):
-                  args.append(Identifier(arg))
-                  found = True
-                  break
-              if not found:
-                print('Undefined action arguments "%s" in action: %s' % (arg, action))
-                exit(1)
-            action.operands = args
+          for arg in action.operands:
+            found: bool = False
+            for param in t.event.parameters:
+              if str(arg) == str(param.name):
+                found = True
+                break
+            if not found:
+              print('Undefined action arguments "%s" in action: %s' % (arg, action))
+              exit(1)
 #+end_src
 ** exporter
 *** basic

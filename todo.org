@@ -25,7 +25,7 @@
 *** TODO apply guard syntaxer
 *** TODO apply action syntaxer
 ** TODO Plantuml
-** INPROGRESS Excel [81%]
+** INPROGRESS Excel [90%]
 *** DONE basic framework
 *** DONE parse variables
 *** DONE parse events
@@ -36,7 +36,7 @@
 *** DONE verify transaction
 *** DONE apply parameter syntaxer
 *** TODO apply guard syntaxer
-*** TODO apply action syntaxer
+*** DONE apply action syntaxer
 * exporter [50%]
 ** INPROGRESS Python [85%]
 *** DONE basic framework

@@ -7,14 +7,18 @@
   from typing import List, NewType, Union
   from abc import ABC, abstractmethod
   from parameter_fsm import ActionDelegate as ParameterActionDelegate, GuardDelegate as ParameterGuardDelegate, VariableDelegate as ParameterVariableDelegate, StateMachine as ParameterStateMachine
+  from action_fsm import ActionDelegate as ActionActionDelegate, GuardDelegate as ActionGuardDelegate, VariableDelegate as ActionVariableDelegate, StateMachine as ActionStateMachine
   from model import Parameter
-  from semantic import Expression, Assignment, Identifier, Delimiter, Call, AndExpression, OrExpression, NotExpression, EqualsExpression, NotEqualToExpression, LessThanExpression, LessThanOrEqualToExpression, GreaterThanExpression, GreaterThanOrEqualToExpression, Var, Type, UnionType, ListType, MapType
+  from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, AndExpression, OrExpression, NotExpression, EqualsExpression, NotEqualToExpression, LessThanExpression, LessThanOrEqualToExpression, GreaterThanExpression, GreaterThanOrEqualToExpression, Fun, Var, Type, UnionType, ListType, MapType
 
 
   <<utility>>
 
 
   <<parameter>>
+
+
+  <<action>>
 #+end_src
 
 ** parameter syntaxer
@@ -1985,6 +1989,104 @@
 #+end_src
 ** action syntaxer
 *** framework
+#+begin_src python :noweb-ref action
+  <<action-context>>
+
+
+  <<action-delegate>>
+
+
+  class ActionSyntaxer:
+
+    def __init__(self):
+      self._fsm = ActionStateMachine(_ActionActionDelegate(), None, None)
+      self._ctx = _ActionContext(self._fsm)
+
+    def identifier(self, id):
+      self._consume_queue()
+      self._fsm.identifier(self._ctx, id)
+      self._consume_queue()
+
+    def literal(self, l):
+      self._consume_queue()
+      self._fsm.literal(self._ctx, l)
+      self._consume_queue()
+
+    def delimiter(self, d):
+      self._consume_queue()
+      self._fsm.delimiter(self._ctx, d)
+      self._consume_queue()
+
+    def eof(self):
+      self._consume_queue()
+      self._fsm.eof(self._ctx, 0)
+      self._consume_queue()
+
+    def result(self):
+      return self._ctx.action
+
+    def _consume_queue(self):
+      while len(self._ctx.queue) > 0:
+        n = self._ctx.queue[0]
+        self._ctx.queue = self._ctx.queue[1:]
+        if isinstance(n, Assignment):
+          self._fsm.assignment(self._ctx, n)
+        elif isinstance(n, Call):
+          self._fsm.call(self._ctx, n)
+        elif isinstance(n, Fun):
+          self._fsm.fun(self._ctx, n)
+        elif isinstance(n, Identifier):
+          self._fsm.identifier(self._ctx, n)
+        elif isinstance(n, Literal):
+          self._fsm.literal(self._ctx, n)
+        elif isinstance(n, Delimiter):
+          self._fsm.delimiter(self._ctx, n)
+        elif isinstance(n, list):
+          self._fsm.operands(self._ctx, n)
+        elif isinstance(n, int):
+          self._fsm.eof(self._ctx, n)
+      while len(self._ctx.delay_queue) > 0:
+        while len(self._ctx.queue) > 0:
+          n = self._ctx.queue[0]
+          self._ctx.queue = self._ctx.queue[1:]
+          if isinstance(n, Assignment):
+            self._fsm.assignment(self._ctx, n)
+          elif isinstance(n, Call):
+            self._fsm.call(self._ctx, n)
+          elif isinstance(n, Fun):
+            self._fsm.fun(self._ctx, n)
+          elif isinstance(n, Identifier):
+            self._fsm.identifier(self._ctx, n)
+          elif isinstance(n, Literal):
+            self._fsm.literal(self._ctx, n)
+          elif isinstance(n, Delimiter):
+            self._fsm.delimiter(self._ctx, n)
+          elif isinstance(n, list):
+            self._fsm.operands(self._ctx, n)
+          elif isinstance(n, int):
+            self._fsm.eof(self._ctx, n)
+        d = self._ctx.delay_queue[0]
+        self._ctx.delay_queue = self._ctx.delay_queue[1:]
+        if isinstance(d, Assignment):
+          self._fsm.assignment(self._ctx, d)
+        elif isinstance(d, Call):
+          self._fsm.call(self._ctx, d)
+        elif isinstance(d, Fun):
+          self._fsm.fun(self._ctx, d)
+        elif isinstance(d, Identifier):
+          self._fsm.identifier(self._ctx, d)
+        elif isinstance(d, Literal):
+          self._fsm.literal(self._ctx, d)
+        elif isinstance(d, Delimiter):
+          self._fsm.delimiter(self._ctx, d)
+        elif isinstance(d, list):
+          self._fsm.operands(self._ctx, d)
+        elif isinstance(d, int):
+          self._fsm.eof(self._ctx, d)
+
+
+  <<action-adapter>>
+#+end_src
 *** bnf
 #+begin_src text
   action = assignment
@@ -1998,6 +2100,7 @@
        | fun
 
   fun = fun identifier
+      | fun literal
       | identifier
 
   operands = literal
@@ -2006,7 +2109,1325 @@
            | operands , identifier
 #+end_src
 *** fsm defination
+#+begin_src json :tangle ${BUILDDIR}/action-fsm.json
+  {
+    "variables": [],
+    "events": [
+      {
+        "name": "assignment",
+        "parameters": [
+          {
+            "name": "a",
+            "type": "assignment"
+          }
+        ]
+      },
+      {
+        "name": "call",
+        "parameters": [
+          {
+            "name": "c",
+            "type": "call"
+          }
+        ]
+      },
+      {
+        "name": "fun",
+        "parameters": [
+          {
+            "name": "f",
+            "type": "fun"
+          }
+        ]
+      },
+      {
+        "name": "operands",
+        "parameters": [
+          {
+            "name": "o",
+            "type": "[identifier | literal]"
+          }
+        ]
+      },
+      {
+        "name": "identifier",
+        "parameters": [
+          {
+            "name": "i",
+            "type": "identifier"
+          }
+        ]
+      },
+      {
+        "name": "literal",
+        "parameters": [
+          {
+            "name": "l",
+            "type": "literal"
+          }
+        ]
+      },
+      {
+        "name": "delimiter",
+        "parameters": [
+          {
+            "name": "d",
+            "type": "delimiter"
+          }
+        ]
+      },
+      {
+        "name": "eof",
+        "parameters": [
+          {
+            "name": "e",
+            "type": "int"
+          }
+        ]
+      }
+    ],
+    "states": [
+      {
+        "name": "action -> \u00b7 assignment $$\naction -> \u00b7 call $$\nassignment -> \u00b7 identifier : identifier = call\nassignment -> \u00b7 identifier = call\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\ncall -> \u00b7 fun\nfun -> \u00b7 fun identifier\nfun -> \u00b7 fun literal\nfun -> \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "assignment",
+            "target": "action -> assignment \u00b7 $$"
+          },
+          {
+            "actions": [
+              "shift(c)"
+            ],
+            "event": "call",
+            "target": "action -> call \u00b7 $$"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\ncall -> fun \u00b7\nfun -> fun \u00b7 identifier\nfun -> fun \u00b7 literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "assignment -> identifier \u00b7 : identifier = call\nassignment -> identifier \u00b7 = call\nfun -> identifier \u00b7"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "action -> assignment \u00b7 $$",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce to action"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "action -> call \u00b7 $$",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce to action"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "assignment -> identifier \u00b7 : identifier = call\nassignment -> identifier \u00b7 = call\nfun -> identifier \u00b7",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(i)"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(l)"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'",
+            "target": "assignment -> identifier : \u00b7 identifier = call"
+          },
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='",
+            "target": "assignment -> identifier = \u00b7 call\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\ncall -> \u00b7 fun\nfun -> \u00b7 fun identifier\nfun -> \u00b7 fun literal\nfun -> \u00b7 identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "assignment -> identifier : \u00b7 identifier = call",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "assignment -> identifier : identifier \u00b7 = call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "assignment -> identifier : identifier \u00b7 = call",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='",
+            "target": "assignment -> identifier : identifier = \u00b7 call\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\ncall -> \u00b7 fun\nfun -> \u00b7 fun identifier\nfun -> \u00b7 fun literal\nfun -> \u00b7 identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "assignment -> identifier : identifier = \u00b7 call\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\ncall -> \u00b7 fun\nfun -> \u00b7 fun identifier\nfun -> \u00b7 fun literal\nfun -> \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce 5 to assignment(c)"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\ncall -> fun \u00b7\nfun -> fun \u00b7 identifier\nfun -> fun \u00b7 literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(i)",
+              "reduce 1 to fun"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "assignment -> identifier = \u00b7 call\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\ncall -> \u00b7 fun\nfun -> \u00b7 fun identifier\nfun -> \u00b7 fun literal\nfun -> \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce 3 to assignment(c)"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\ncall -> fun \u00b7\nfun -> fun \u00b7 identifier\nfun -> fun \u00b7 literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(i)",
+              "reduce 1 to fun"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\ncall -> fun \u00b7\nfun -> fun \u00b7 identifier\nfun -> fun \u00b7 literal",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(i)",
+              "reduce 2 to fun"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce 2 to fun"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('",
+            "target": "call -> fun ( \u00b7 operands )\ncall -> fun ( \u00b7 )\noperands -> \u00b7 operands , literal\noperands -> \u00b7 operands , identifier\noperands -> \u00b7 literal\noperands -> \u00b7 identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "reduce 1 to call",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "call -> fun ( \u00b7 operands )\ncall -> fun ( \u00b7 )\noperands -> \u00b7 operands , literal\noperands -> \u00b7 operands , identifier\noperands -> \u00b7 literal\noperands -> \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "shift(o)"
+            ],
+            "event": "operands",
+            "target": "call -> fun ( operands \u00b7 )\noperands -> operands \u00b7 , literal\noperands -> operands \u00b7 , identifier"
+          },
+          {
+            "actions": [
+              "shift(i)",
+              "reduce 1 to operands"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce 1 to operands"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce 3 to call"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','",
+            "target": "operands -> operands , \u00b7 literal\noperands -> operands , \u00b7 identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "call -> fun ( operands \u00b7 )\noperands -> operands \u00b7 , literal\noperands -> operands \u00b7 , identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce 4 to call"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','",
+            "target": "operands -> operands , \u00b7 literal\noperands -> operands , \u00b7 identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "operands -> operands , \u00b7 literal\noperands -> operands , \u00b7 identifier",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "assignment"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(i)",
+              "reduce 2 to operands"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce 2 to operands"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ':'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '('"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ')'"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == '='"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == ','"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      }
+    ]
+  }
+#+end_src
 
+*** context
+#+begin_src python :noweb-ref action-context
+  class _ActionContext:
+    action: Union[Assignment, Call]
+
+    def __init__(self, fsm = None):
+      self.fsm = fsm
+      self.queue = []
+      self.delay_queue = []
+      self.state_stack = []
+      self.stack = []
+      self.action = None
+#+end_src
+*** delegate
+#+begin_src python :noweb-ref action-delegate
+  class _ActionActionDelegate(ActionActionDelegate):
+
+    def shift(self, ctx, l):
+      ctx.state_stack.append(ctx.fsm.state)
+      ctx.stack.append(l)
+
+    def syntax_error(self, ctx):
+      print("syntax error in action syntaxer")
+
+    def quit(self, ctx):
+      exit(1)
+
+    def reduce_to_action(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.action = ctx.stack.pop()
+
+    def reduce_1_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.queue.append(Fun(id))
+
+    def enqueue(self, ctx, e):
+      ctx.delay_queue.append(e)
+
+    def reduce_5_to_assignment(self, ctx, c):
+      ctx.fsm.state = ctx.state_stack.pop()
+      call = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      type = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.queue.append(Assignment(id, type, call))
+
+    def reduce_3_to_assignment(self, ctx, c):
+      ctx.fsm.state = ctx.state_stack.pop()
+      call = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.queue.append(Assignment(id, None, call))
+
+    def reduce_2_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      fun.names.append(id)
+      ctx.queue.append(fun)
+
+    def reduce_1_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      ctx.queue.append(Call(fun, []))
+
+    def reduce_1_to_operands(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      operand = ctx.stack.pop()
+      ctx.queue.append([operand])
+
+    def reduce_3_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      ctx.queue.append(Call(fun, []))
+
+    def reduce_4_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      operands = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      ctx.queue.append(Call(fun, operands))
+
+    def reduce_2_to_operands(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      operand1 = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      operand2 = ctx.stack.pop()
+      ctx.queue.append(operand2 + operand1)
+#+end_src
+*** lex adapter
+#+begin_src python :noweb-ref action-adapter
+  class ActionLexerAdapter:
+
+    def __init__(self, syntaxer: ActionSyntaxer):
+      self._syntaxer = syntaxer
+
+    def on_call(self, token):
+      if isinstance(token, Identifier):
+        self._syntaxer.identifier(token)
+      elif isinstance(token, Literal):
+        self._syntaxer.literal(token)
+      elif isinstance(token, Delimiter):
+        self._syntaxer.delimiter(token)
+      else:
+        print('Unknown token in parameter lexer adapter: %s' % (repr(token)))
+        exit(1)
+#+end_src
 ** utility
 *** framework
 #+begin_src python :noweb-ref utility

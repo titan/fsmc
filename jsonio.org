@@ -249,8 +249,8 @@
             elif isinstance(action, Call):
               if len(action.operands) > 0:
                 actions.append(str(action))
-              elif len(action.operator.name) > 0:
-                actions.append(action.operator.name)
+              elif len(str(action.operator)) > 0:
+                actions.append(str(action.operator))
           if len(actions) > 0:
             data['actions'] = actions
         if obj.event:

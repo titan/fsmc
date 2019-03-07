@@ -22,6 +22,9 @@
   <<assignment>>
 
 
+  <<fun>>
+
+
   <<var>>
 
 
@@ -217,7 +220,7 @@
       elif self.type == 'string':
         return '"%s"' % self.name
       else:
-        return self.name
+        return str(self.name)
 
     def __repr__(self):
       return 'Literal(%s: %s)' % (self.name, self.type)
@@ -263,6 +266,18 @@
         return 'Assignment(%s: %s = %s)' % (self.target, self.type, self.expression)
       else:
         return 'Assignment(%s = %s)' % (self.target, self.expression)
+#+end_src
+
+** Fun
+#+begin_src python :noweb-ref fun
+  class Fun:
+    names: List[Union[Identifier, Literal]]
+
+    def __init__(self, name: Union[Identifier, Literal]):
+      self.names = [name]
+
+    def __str__(self):
+      return ' '.join([str(x) for x in self.names])
 #+end_src
 
 ** Var
