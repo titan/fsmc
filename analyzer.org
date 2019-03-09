@@ -6825,21 +6825,25 @@
 
     def identifier(self, id):
       self._consume_queue()
+      self._ctx.input = id
       self._fsm.identifier(self._ctx, id)
       self._consume_queue()
 
     def literal(self, l):
       self._consume_queue()
+      self._ctx.input = l
       self._fsm.literal(self._ctx, l)
       self._consume_queue()
 
     def delimiter(self, d):
       self._consume_queue()
+      self._ctx.input = d
       self._fsm.delimiter(self._ctx, d)
       self._consume_queue()
 
     def eof(self):
       self._consume_queue()
+      self._ctx.input = 'eof'
       self._fsm.eof(self._ctx, 0)
       self._consume_queue()
 
@@ -6850,60 +6854,36 @@
       while len(self._ctx.queue) > 0:
         n = self._ctx.queue[0]
         self._ctx.queue = self._ctx.queue[1:]
-        if isinstance(n, Assignment):
-          self._fsm.assignment(self._ctx, n)
-        elif isinstance(n, Call):
-          self._fsm.call(self._ctx, n)
-        elif isinstance(n, Fun):
-          self._fsm.fun(self._ctx, n)
-        elif isinstance(n, Identifier):
-          self._fsm.identifier(self._ctx, n)
-        elif isinstance(n, Literal):
-          self._fsm.literal(self._ctx, n)
-        elif isinstance(n, Delimiter):
-          self._fsm.delimiter(self._ctx, n)
-        elif isinstance(n, list):
-          self._fsm.operands(self._ctx, n)
-        elif isinstance(n, int):
-          self._fsm.eof(self._ctx, n)
+        self._ctx.input = n
+        self._feed(n)
       while len(self._ctx.delay_queue) > 0:
         while len(self._ctx.queue) > 0:
           n = self._ctx.queue[0]
           self._ctx.queue = self._ctx.queue[1:]
-          if isinstance(n, Assignment):
-            self._fsm.assignment(self._ctx, n)
-          elif isinstance(n, Call):
-            self._fsm.call(self._ctx, n)
-          elif isinstance(n, Fun):
-            self._fsm.fun(self._ctx, n)
-          elif isinstance(n, Identifier):
-            self._fsm.identifier(self._ctx, n)
-          elif isinstance(n, Literal):
-            self._fsm.literal(self._ctx, n)
-          elif isinstance(n, Delimiter):
-            self._fsm.delimiter(self._ctx, n)
-          elif isinstance(n, list):
-            self._fsm.operands(self._ctx, n)
-          elif isinstance(n, int):
-            self._fsm.eof(self._ctx, n)
+          self._ctx.input = n
+          self._feed(n)
         d = self._ctx.delay_queue[0]
         self._ctx.delay_queue = self._ctx.delay_queue[1:]
-        if isinstance(d, Assignment):
-          self._fsm.assignment(self._ctx, d)
-        elif isinstance(d, Call):
-          self._fsm.call(self._ctx, d)
-        elif isinstance(d, Fun):
-          self._fsm.fun(self._ctx, d)
-        elif isinstance(d, Identifier):
-          self._fsm.identifier(self._ctx, d)
-        elif isinstance(d, Literal):
-          self._fsm.literal(self._ctx, d)
-        elif isinstance(d, Delimiter):
-          self._fsm.delimiter(self._ctx, d)
-        elif isinstance(d, list):
-          self._fsm.operands(self._ctx, d)
-        elif isinstance(d, int):
-          self._fsm.eof(self._ctx, d)
+        self._ctx.input = d
+        self._feed(d)
+
+    def _feed(self, n):
+      if isinstance(n, Assignment):
+        self._fsm.assignment(self._ctx, n)
+      elif isinstance(n, Call):
+        self._fsm.call(self._ctx, n)
+      elif isinstance(n, Fun):
+        self._fsm.fun(self._ctx, n)
+      elif isinstance(n, Identifier):
+        self._fsm.identifier(self._ctx, n)
+      elif isinstance(n, Literal):
+        self._fsm.literal(self._ctx, n)
+      elif isinstance(n, Delimiter):
+        self._fsm.delimiter(self._ctx, n)
+      elif isinstance(n, list):
+        self._fsm.operands(self._ctx, n)
+      elif isinstance(n, int):
+        self._fsm.eof(self._ctx, n)
 
 
   <<action-adapter>>
@@ -8137,6 +8117,7 @@
       self.state_stack = []
       self.stack = []
       self.action = None
+      self.input = None
 #+end_src
 *** delegate
 #+begin_src python :noweb-ref action-delegate
@@ -8148,6 +8129,10 @@
 
     def syntax_error(self, ctx):
       print("syntax error in action syntaxer")
+      print("current state: %d" % ctx.fsm.state)
+      print("stack: %s" % ctx.stack)
+      print("state stack: %s" % ctx.state_stack)
+      print("input: %s" % ctx.input)
 
     def quit(self, ctx):
       exit(1)
@@ -8173,6 +8158,8 @@
       ctx.stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
       type = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
       id = ctx.stack.pop()
       ctx.queue.append(Assignment(id, type, call))
