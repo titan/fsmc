@@ -6,7 +6,7 @@
   from typing import List, NewType, Union
   from abc import ABC, abstractmethod
   from lexer_fsm import ActionDelegate as LexerActionDelegate, GuardDelegate as LexerGuardDelegate, VariableDelegate as LexerVariableDelegate, StateMachine as LexerStateMachine
-  from semantic import Expression, Assignment, Identifier, Delimiter, Call, AndExpression, OrExpression, NotExpression, EqualsExpression, NotEqualToExpression, LessThanExpression, LessThanOrEqualToExpression, GreaterThanExpression, GreaterThanOrEqualToExpression, Var, Type, UnionType, ListType, MapType
+  from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, Var, Type, UnionType, ListType, MapType
 
   <<lexer-adapter>>
 
@@ -4362,6 +4362,10 @@
       ch = ''.join(ctx.buffer)
       return Literal(ch, 'char')
 
+    def string(self, ctx):
+      string = ''.join(ctx.buffer)
+      return Literal(string, 'string')
+
     def open_bracket(self, ctx):
       return Delimiter('[')
 
@@ -4384,7 +4388,7 @@
       return Delimiter('!')
 
     def dot(self, ctx):
-      return Delimiter('dot')
+      return Delimiter('.')
 
     def colon(self, ctx):
       return Delimiter(':')

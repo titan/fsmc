@@ -256,7 +256,7 @@
         if obj.event:
           data['event'] = obj.event.name
         if obj.guard:
-          data['guard'] = obj.guard
+          data['guard'] = str(obj.guard)
         if obj.target:
           data['target'] = obj.target.name
         return data

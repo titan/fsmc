@@ -8,8 +8,9 @@
   from abc import ABC, abstractmethod
   from parameter_fsm import ActionDelegate as ParameterActionDelegate, GuardDelegate as ParameterGuardDelegate, VariableDelegate as ParameterVariableDelegate, StateMachine as ParameterStateMachine
   from action_fsm import ActionDelegate as ActionActionDelegate, GuardDelegate as ActionGuardDelegate, VariableDelegate as ActionVariableDelegate, StateMachine as ActionStateMachine
+  from guard_fsm import ActionDelegate as GuardActionDelegate, GuardDelegate as GuardGuardDelegate, VariableDelegate as GuardVariableDelegate, StateMachine as GuardStateMachine
   from model import Parameter
-  from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, AndExpression, OrExpression, NotExpression, EqualsExpression, NotEqualToExpression, LessThanExpression, LessThanOrEqualToExpression, GreaterThanExpression, GreaterThanOrEqualToExpression, Fun, Var, Type, UnionType, ListType, MapType
+  from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, BoolExpression, UnaryBoolExpression, BinaryBoolExpression, CompareExpression, Accessor, Fun, Var, Type, UnionType, ListType, MapType
 
 
   <<utility>>
@@ -19,6 +20,9 @@
 
 
   <<action>>
+
+
+  <<guard>>
 #+end_src
 
 ** parameter syntaxer
@@ -1955,37 +1959,4854 @@
 #+end_src
 
 ** guard syntaxer
+*** framework
+#+begin_src python :noweb-ref guard
+  <<guard-context>>
+
+
+  <<guard-delegate>>
+
+
+  class GuardSyntaxer:
+
+    def __init__(self):
+      self._fsm = GuardStateMachine(_GuardActionDelegate(), None, None)
+      self._ctx = _GuardContext(self._fsm)
+
+    def identifier(self, id):
+      self._consume_queue()
+      self._fsm.identifier(self._ctx, id)
+      self._consume_queue()
+
+    def literal(self, l):
+      self._consume_queue()
+      self._fsm.literal(self._ctx, l)
+      self._consume_queue()
+
+    def delimiter(self, d):
+      self._consume_queue()
+      self._fsm.delimiter(self._ctx, d)
+      self._consume_queue()
+
+    def eof(self):
+      self._consume_queue()
+      self._fsm.eof(self._ctx, 0)
+      self._consume_queue()
+
+    def result(self):
+      return self._ctx.guard
+
+    def _consume_queue(self):
+      while len(self._ctx.queue) > 0:
+        n = self._ctx.queue[0]
+        self._ctx.queue = self._ctx.queue[1:]
+        self._feed(n)
+      while len(self._ctx.delay_queue) > 0:
+        while len(self._ctx.queue) > 0:
+          n = self._ctx.queue[0]
+          self._ctx.queue = self._ctx.queue[1:]
+          self._feed(n)
+        d = self._ctx.delay_queue[0]
+        self._ctx.delay_queue = self._ctx.delay_queue[1:]
+        self._feed(d)
+
+    def _feed(self, n):
+      if isinstance(n, BoolExpression):
+        self._fsm.bool_expression(self._ctx, n)
+      elif isinstance(n, CompareExpression):
+        self._fsm.compare_expression(self._ctx, n)
+      elif isinstance(n, Expression):
+        self._fsm.expression(self._ctx, n)
+      elif isinstance(n, Call):
+        self._fsm.call(self._ctx, n)
+      elif isinstance(n, Fun):
+        self._fsm.fun(self._ctx, n)
+      elif isinstance(n, Accessor):
+        self._fsm.accessor(self._ctx, n)
+      elif isinstance(n, Identifier):
+        self._fsm.identifier(self._ctx, n)
+      elif isinstance(n, Literal):
+        self._fsm.literal(self._ctx, n)
+      elif isinstance(n, Delimiter):
+        self._fsm.delimiter(self._ctx, n)
+      elif isinstance(n, list):
+        self._fsm.operands(self._ctx, n)
+      elif isinstance(n, int):
+        self._fsm.eof(self._ctx, n)
+
+  <<guard-adapter>>
+#+end_src
+*** bnf
 #+begin_src text
   guard = bool-expression
 
-  bool-expression = bool-expression bool-op expression
-                  | negative-expression
+  bool-expression = bool-expression and bool-expression
+                  | bool-expression or bool-expression
+                  | not boo-expression
                   | compare-expression
+                  | ( bool-expression )
                   | expression
 
-  negative-expression = not bool-expression
-
-  compare-expression = expression cmp expression
+  compare-expression = expression == expression
+                     | expression != expression
+                     | expression >  expression
+                     | expression >= expression
+                     | expression <  expression
+                     | expression <= expression
 
   expression = call
+             | accessor
              | literal
              | identifier
 
-  call = identifier ( operands )
+  call = fun ( operands )
+       | fun ( )
 
-  operands = empty
-           | expression
+  fun = fun identifier
+      | fun literal
+      | identifier
+
+  operands = expression
            | operands , expression
 
-  bool-op = and
-          | or
+  accessor = accessor . identifier
+           | identifier . identifier
+#+end_src
 
-  cmp = ==
-      | !=
-      | >
-      | >=
-      | <
-      | <=
+*** fsm defination
+#+begin_src json :tangle ${BUILDDIR}/guard-fsm.json
+  {
+    "variables": [],
+    "events": [
+      {
+        "name": "identifier",
+        "parameters": [
+          {
+            "name": "i",
+            "type": "Identifier"
+          }
+        ]
+      },
+      {
+        "name": "literal",
+        "parameters": [
+          {
+            "name": "l",
+            "type": "Literal"
+          }
+        ]
+      },
+      {
+        "name": "delimiter",
+        "parameters": [
+          {
+            "name": "d",
+            "type": "Delimiter"
+          }
+        ]
+      },
+      {
+        "name": "bool_expression",
+        "parameters": [
+          {
+            "name": "e",
+            "type": "BoolExpression"
+          }
+        ]
+      },
+      {
+        "name": "compare_expression",
+        "parameters": [
+          {
+            "name": "e",
+            "type": "CompareExpression"
+          }
+        ]
+      },
+      {
+        "name": "expression",
+        "parameters": [
+          {
+            "name": "e",
+            "type": "Expression"
+          }
+        ]
+      },
+      {
+        "name": "call",
+        "parameters": [
+          {
+            "name": "c",
+            "type": "Call"
+          }
+        ]
+      },
+      {
+        "name": "fun",
+        "parameters": [
+          {
+            "name": "f",
+            "type": "Fun"
+          }
+        ]
+      },
+      {
+        "name": "operands",
+        "parameters": [
+          {
+            "name": "o",
+            "type": "[Call | Literal | Identifier]"
+          }
+        ]
+      },
+      {
+        "name": "accessor",
+        "parameters": [
+          {
+            "name": "a",
+            "type": "Accessor"
+          }
+        ]
+      },
+      {
+        "name": "eof",
+        "parameters": [
+          {
+            "name": "e",
+            "type": "int"
+          }
+        ]
+      }
+    ],
+    "states": [
+      {
+        "name": "guard -> \u00b7 bool-expr $$\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\"",
+            "target": "bool-expr -> not \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\"",
+            "target": "bool-expr -> ( \u00b7 bool-expr )\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "bool_expression",
+            "target": "guard -> bool-expr \u00b7 $$\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 1 to bool expr"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "expression",
+            "target": "bool-expr -> expr \u00b7\ncmp-expr -> expr \u00b7 == expr\ncmp-expr -> expr \u00b7 != expr\ncmp-expr -> expr \u00b7 >  expr\ncmp-expr -> expr \u00b7 >= expr\ncmp-expr -> expr \u00b7 <  expr\ncmp-expr -> expr \u00b7 <= expr"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "guard -> bool-expr \u00b7 $$\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\"",
+            "target": "bool-expr -> bool-expr and \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\"",
+            "target": "bool-expr -> bool-expr or \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce to guard"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> bool-expr and \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\"",
+            "target": "bool-expr -> not \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\"",
+            "target": "bool-expr -> ( \u00b7 bool-expr )\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "bool_expression",
+            "target": "bool-expr -> bool-expr and bool-expr \u00b7\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 1 to bool expr"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "expression",
+            "target": "bool-expr -> expr \u00b7\ncmp-expr -> expr \u00b7 == expr\ncmp-expr -> expr \u00b7 != expr\ncmp-expr -> expr \u00b7 >  expr\ncmp-expr -> expr \u00b7 >= expr\ncmp-expr -> expr \u00b7 <  expr\ncmp-expr -> expr \u00b7 <= expr"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> bool-expr and bool-expr \u00b7\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\"",
+            "target": "bool-expr -> bool-expr and \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\"",
+            "target": "bool-expr -> bool-expr or \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "reduce 3 to bool expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "reduce 3 to bool expr",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> bool-expr or \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\"",
+            "target": "bool-expr -> not \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\"",
+            "target": "bool-expr -> ( \u00b7 bool-expr )\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "bool_expression",
+            "target": "bool-expr -> bool-expr or bool-expr \u00b7\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 1 to bool expr"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "expression",
+            "target": "bool-expr -> expr \u00b7\ncmp-expr -> expr \u00b7 == expr\ncmp-expr -> expr \u00b7 != expr\ncmp-expr -> expr \u00b7 >  expr\ncmp-expr -> expr \u00b7 >= expr\ncmp-expr -> expr \u00b7 <  expr\ncmp-expr -> expr \u00b7 <= expr"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> bool-expr or bool-expr \u00b7\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\"",
+            "target": "bool-expr -> bool-expr and \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\"",
+            "target": "bool-expr -> bool-expr or \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "reduce 3 to bool expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "reduce 3 to bool expr",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> not \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\"",
+            "target": "bool-expr -> not \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\"",
+            "target": "bool-expr -> ( \u00b7 bool-expr )\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "bool_expression",
+            "target": "bool-expr -> not bool-expr \u00b7\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 1 to bool expr"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "expression",
+            "target": "bool-expr -> expr \u00b7\ncmp-expr -> expr \u00b7 == expr\ncmp-expr -> expr \u00b7 != expr\ncmp-expr -> expr \u00b7 >  expr\ncmp-expr -> expr \u00b7 >= expr\ncmp-expr -> expr \u00b7 <  expr\ncmp-expr -> expr \u00b7 <= expr"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> not bool-expr \u00b7\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\"",
+            "target": "bool-expr -> bool-expr and \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\"",
+            "target": "bool-expr -> bool-expr or \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "reduce 2 to bool expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "reduce 2 to bool expr",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> ( \u00b7 bool-expr )\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\"",
+            "target": "bool-expr -> not \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\"",
+            "target": "bool-expr -> ( \u00b7 bool-expr )\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "bool_expression",
+            "target": "bool-expr -> ( bool-expr \u00b7 )\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 1 to bool expr"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)"
+            ],
+            "event": "expression",
+            "target": "bool-expr -> expr \u00b7\ncmp-expr -> expr \u00b7 == expr\ncmp-expr -> expr \u00b7 != expr\ncmp-expr -> expr \u00b7 >  expr\ncmp-expr -> expr \u00b7 >= expr\ncmp-expr -> expr \u00b7 <  expr\ncmp-expr -> expr \u00b7 <= expr"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> ( bool-expr \u00b7 )\nbool-expr -> bool-expr \u00b7 and bool-expr\nbool-expr -> bool-expr \u00b7 or bool-expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\"",
+            "target": "bool-expr -> bool-expr and \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\"",
+            "target": "bool-expr -> bool-expr or \u00b7 bool-expr\nbool-expr -> \u00b7 bool-expr and bool-expr\nbool-expr -> \u00b7 bool-expr or bool-expr\nbool-expr -> \u00b7 not bool-expr\nbool-expr -> \u00b7 cmp-expr\nbool-expr -> \u00b7 ( bool-expr )\nbool-expr -> \u00b7 expr\ncmp-expr -> \u00b7 expr == expr\ncmp-expr -> \u00b7 expr != expr\ncmp-expr -> \u00b7 expr >  expr\ncmp-expr -> \u00b7 expr >= expr\ncmp-expr -> \u00b7 expr <  expr\ncmp-expr -> \u00b7 expr <= expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce 3 to bool expr"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "bool-expr -> expr \u00b7\ncmp-expr -> expr \u00b7 == expr\ncmp-expr -> expr \u00b7 != expr\ncmp-expr -> expr \u00b7 >  expr\ncmp-expr -> expr \u00b7 >= expr\ncmp-expr -> expr \u00b7 <  expr\ncmp-expr -> expr \u00b7 <= expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "reduce 1 to bool expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\"",
+            "target": "cmp-expr -> expr == \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\"",
+            "target": "cmp-expr -> expr != \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\"",
+            "target": "cmp-expr -> expr >  \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun ->  \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\"",
+            "target": "cmp-expr -> expr >= \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\"",
+            "target": "cmp-expr -> expr <  \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\"",
+            "target": "cmp-expr -> expr <= \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "reduce 1 to bool expr",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "cmp-expr -> expr == \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to cmp expr"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "cmp-expr -> expr != \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to cmp expr"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "cmp-expr -> expr <  \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to cmp expr"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "cmp-expr -> expr <= \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to cmp expr"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "cmp-expr -> expr >  \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun ->  \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to cmp expr"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "cmp-expr -> expr >= \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to cmp expr"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)",
+              "reduce 2 to fun"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce 2 to fun"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\"",
+            "target": "call -> fun ( \u00b7 operands )\ncall -> fun ( \u00b7 )\noperands -> \u00b7 expr\noperands -> \u00b7 operands , expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "call -> fun ( \u00b7 operands )\ncall -> fun ( \u00b7 )\noperands -> \u00b7 expr\noperands -> \u00b7 operands , expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce 3 to call"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 1 to operands"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "shift(o)"
+            ],
+            "event": "operands",
+            "target": "call -> fun ( operands \u00b7 )\noperands -> operands \u00b7 , expr"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "call -> fun ( operands \u00b7 )\noperands -> operands \u00b7 , expr",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "shift(d)",
+              "reduce 4 to call"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\"",
+            "target": "operands -> operands , \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "operands -> operands , \u00b7 expr\nexpr -> \u00b7 call\nexpr -> \u00b7 accessor\nexpr -> \u00b7 lit\nexpr -> \u00b7 id\ncall -> \u00b7 fun ( operands )\ncall -> \u00b7 fun ( )\nfun -> \u00b7 fun id\nfun -> \u00b7 fun lit\nfun -> \u00b7 id\naccessor -> \u00b7 accessor dot id\naccessor -> \u00b7 id dot id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)"
+            ],
+            "event": "identifier",
+            "target": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "shift(l)",
+              "reduce to expr"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "shift(e)",
+              "reduce 3 to operands"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "shift(c)",
+              "reduce to expr"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "shift(f)"
+            ],
+            "event": "fun",
+            "target": "call -> fun \u00b7 ( operands )\ncall -> fun \u00b7 ( )\nfun -> fun \u00b7 id\nfun -> fun \u00b7 lit"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "shift(a)"
+            ],
+            "event": "accessor",
+            "target": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "expr -> id \u00b7\nfun -> id \u00b7\naccessor -> id \u00b7 dot id",
+        "transactions": [
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(i)"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(l)"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "reduce 1 to fun",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\"",
+            "target": "accessor -> id dot \u00b7 id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(e)"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "expr -> accessor \u00b7\naccessor -> accessor \u00b7 dot id",
+        "transactions": [
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(i)"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "reduce to expr",
+              "enqueue(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "shift(d)"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\"",
+            "target": "accessor -> accessor dot \u00b7 id"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "accessor -> accessor dot \u00b7 id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)",
+              "reduce to accessor"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      },
+      {
+        "name": "accessor -> id dot \u00b7 id",
+        "transactions": [
+          {
+            "actions": [
+              "shift(i)",
+              "reduce to accessor"
+            ],
+            "event": "identifier"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "literal"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"and\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"or\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "identifier",
+            "guard": "i.name == \"not\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"(\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \")\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"==\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"!=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \">=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \"<=\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \",\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "delimiter",
+            "guard": "d.name == \".\""
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "bool_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "compare_expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "expression"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "call"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "fun"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "operands"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "accessor"
+          },
+          {
+            "actions": [
+              "syntax error",
+              "quit"
+            ],
+            "event": "eof"
+          }
+        ]
+      }
+    ]
+  }
+#+end_src
+
+*** context
+#+begin_src python :noweb-ref guard-context
+  class _GuardContext:
+    guard: BoolExpression
+
+    def __init__(self, fsm = None):
+      self.fsm = fsm
+      self.queue = []
+      self.delay_queue = []
+      self.state_stack = []
+      self.stack = []
+      self.guard = None
+#+end_src
+*** delegate
+#+begin_src python :noweb-ref guard-delegate
+  class _GuardActionDelegate(GuardActionDelegate):
+
+    def shift(self, ctx, l):
+      ctx.state_stack.append(ctx.fsm.state)
+      ctx.stack.append(l)
+
+    def syntax_error(self, ctx):
+      print("syntax error in guard syntaxer")
+
+    def quit(self, ctx):
+      exit(1)
+
+    def enqueue(self, ctx, e):
+      ctx.delay_queue.append(e)
+
+    def reduce_to_guard(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.guard = ctx.stack.pop()
+
+    def reduce_1_to_bool_expr(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.stack.pop()
+      ctx.queue.append(BoolExpression(expr))
+
+    def reduce_2_to_bool_expr(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      op = ctx.stack.pop()
+      ctx.queue.append(UnaryBoolExpression(op, expr))
+
+    def reduce_3_to_bool_expr(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr2 = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      op = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr1 = ctx.stack.pop()
+      ctx.queue.append(BinaryBoolExpression(expr1, op, expr2))
+
+    def reduce_3_to_cmp_expr(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr2 = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      op = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr1 = ctx.stack.pop()
+      ctx.queue.append(CompareExpression(expr1, op, expr2))
+
+    def reduce_to_expr(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.stack.pop()
+      ctx.queue.append(Expression(expr))
+
+    def reduce_3_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      ctx.queue.append(Call(fun, []))
+
+    def reduce_4_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      operands = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      ctx.queue.append(Call(fun, operands))
+
+    def reduce_1_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.queue.append(Fun(id))
+
+    def reduce_2_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.stack.pop()
+      fun.names.append(id)
+      ctx.queue.append(fun)
+
+    def reduce_1_to_operands(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.stack.pop()
+      ctx.queue.append([expr])
+
+    def reduce_3_to_operands(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      operands = ctx.stack.pop()
+      operands.append(expr)
+      ctx.queue.append(operands)
+
+    def reduce_to_accessor(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      accessor_or_id = ctx.stack.pop()
+      if isinstance(accessor_or_id, Identifier):
+        ctx.queue.append(Accessor([accessor_or_id, id]))
+      else:
+        accessor_or_id.accessors.append(id)
+        ctx.queue.append(accessor_or_id)
+#+end_src
+*** lex adapter
+#+begin_src python :noweb-ref guard-adapter
+  class GuardLexerAdapter:
+
+    def __init__(self, syntaxer: GuardSyntaxer):
+      self._syntaxer = syntaxer
+
+    def on_call(self, token):
+      if isinstance(token, Identifier):
+        self._syntaxer.identifier(token)
+      elif isinstance(token, Literal):
+        self._syntaxer.literal(token)
+      elif isinstance(token, Delimiter):
+        self._syntaxer.delimiter(token)
+      else:
+        print('Unknown token in parameter lexer adapter: %s' % (repr(token)))
+        exit(1)
 #+end_src
 ** action syntaxer
 *** framework
@@ -3438,45 +8259,18 @@
   def find_call_in_expression(exp: Expression):
     if isinstance(exp, Call):
       yield exp
-    elif isinstance(exp, AndExpression):
+    elif isinstance(exp, BoolExpression):
+      for x in find_call_in_expression(exp.expr):
+        yield x
+    elif isinstance(exp, BinaryBoolExpression):
       for x in find_call_in_expression(exp.left):
         yield x
       for y in find_call_in_expression(exp.right):
         yield y
-    elif isinstance(exp, OrExpression):
-      for x in find_call_in_expression(exp.left):
+    elif isinstance(exp, UnaryBoolExpression):
+      for x in find_call_in_expression(exp.expr):
         yield x
-      for y in find_call_in_expression(exp.right):
-        yield y
-    elif isinstance(exp, NotExpression):
-      for x in find_call_in_expression(exp.exp):
-        yield x
-    elif isinstance(exp, EqualsExpression):
-      for x in find_call_in_expression(exp.left):
-        yield x
-      for y in find_call_in_expression(exp.right):
-        yield y
-    elif isinstance(exp, NotEqualToExpression):
-      for x in find_call_in_expression(exp.left):
-        yield x
-      for y in find_call_in_expression(exp.right):
-        yield y
-    elif isinstance(exp, GreaterThanExpression):
-      for x in find_call_in_expression(exp.left):
-        yield x
-      for y in find_call_in_expression(exp.right):
-        yield y
-    elif isinstance(exp, GreaterThanOrEqualToExpression):
-      for x in find_call_in_expression(exp.left):
-        yield x
-      for y in find_call_in_expression(exp.right):
-        yield y
-    elif isinstance(exp, LessThanExpression):
-      for x in find_call_in_expression(exp.left):
-        yield x
-      for y in find_call_in_expression(exp.right):
-        yield y
-    elif isinstance(exp, LessThanOrEqualToExpression):
+    elif isinstance(exp, CompareExpression):
       for x in find_call_in_expression(exp.left):
         yield x
       for y in find_call_in_expression(exp.right):

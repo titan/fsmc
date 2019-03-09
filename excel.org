@@ -5,7 +5,7 @@
   from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transaction, Variable
   from semantic import Assignment, Call, Expression, Identifier
-  from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter
+  from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
   from lexer import Lexer
   import re
 
@@ -49,7 +49,6 @@
       result = re.search('(.*)\((.*)\)\[(.*)\]', header.value)
       if result:
         eventname = result.group(1).strip()
-        guard = result.group(3).strip()
 
         syntaxer = ParameterSyntaxer()
         lexer = Lexer(ParameterLexerAdapter(syntaxer))
@@ -58,6 +57,14 @@
         lexer.eof()
         syntaxer.eof()
         parameters = syntaxer.result()
+
+        syntaxer = GuardSyntaxer()
+        lexer = Lexer(GuardLexerAdapter(syntaxer))
+        for ch in result.group(3):
+          lexer.feed(ch)
+        lexer.eof()
+        syntaxer.eof()
+        guard = syntaxer.result()
       else:
         result = re.search('(.*)\((.*)\)', header.value)
         if result:
