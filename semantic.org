@@ -82,9 +82,14 @@
 
     def __str__(self):
       if self.type == 'char':
-        return "'%s'" % self.name
+        if self.name == "'":
+          return "'\\''"
+        elif self.name == "\\":
+          return "'\\\\'"
+        else:
+          return "'%s'" % self.name
       elif self.type == 'string':
-        return '"%s"' % self.name
+        return '"%s"' % (self.name.replace('"', '\\"'))
       else:
         return str(self.name)
 

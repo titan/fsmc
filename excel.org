@@ -20,14 +20,14 @@
 
   <<parse-states>>
 
-  def load(src: str) -> List[Event]:
+  def load(src: str) -> Tuple[List[Variable], List[State]]:
     from openpyxl import load_workbook
     wb = load_workbook(src, read_only = True)
     wx = wb[wb.sheetnames[0]]
     events = _parse_events(wx)
-    states = _parse_states(wx, events)
+    (variables, states) = _parse_states(wx, events)
     wb.close()
-    return states
+    return (variables, states)
 #+end_src
 
 *** parse events
@@ -149,6 +149,9 @@
               lexer.eof()
               syntaxer.eof()
               transaction.actions.append(syntaxer.result())
+              if isinstance(syntaxer.result(), Assignment):
+                assignment = syntaxer.result()
+                variables[str(assignment.target) + str(assignment.type)] = Variable(str(assignment.target), str(assignment.type))
             else:
               transaction._targetstrs.append(line)
           if len(transaction._targetstrs) > 0:

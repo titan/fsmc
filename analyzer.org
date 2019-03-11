@@ -42,16 +42,19 @@
 
     def identifier(self, id):
       self._consume_queue()
+      self._ctx.input = id
       self._fsm.identifier(self._ctx, id)
       self._consume_queue()
 
     def delimiter(self, d):
       self._consume_queue()
+      self._ctx.input = d
       self._fsm.delimiter(self._ctx, d)
       self._consume_queue()
 
     def eof(self):
       self._consume_queue()
+      self._ctx.input = 'eof'
       self._fsm.eof(self._ctx, 0)
       self._consume_queue()
 
@@ -62,41 +65,36 @@
       while len(self._ctx.queue) > 0:
         n = self._ctx.queue[0]
         self._ctx.queue = self._ctx.queue[1:]
-        if isinstance(n, Var):
-          self._fsm.var(self._ctx, n)
-        elif isinstance(n, Type):
-          self._fsm.type(self._ctx, n)
-        elif isinstance(n, UnionType):
-          self._fsm.union_type(self._ctx, n)
-        elif isinstance(n, ListType):
-          self._fsm.list_type(self._ctx, n)
-        elif isinstance(n, MapType):
-          self._fsm.map_type(self._ctx, n)
-        elif isinstance(n, Parameter):
-          self._fsm.parameter(self._ctx, n)
-        elif isinstance(n, list):
-          self._fsm.parameters(self._ctx, n)
-        elif isinstance(n, int):
-          self._fsm.eof(self._ctx, n)
+        self._ctx.input = n
+        self._feed(n)
       while len(self._ctx.delay_queue) > 0:
-        n = self._ctx.delay_queue[0]
+        while len(self._ctx.queue) > 0:
+          n = self._ctx.queue[0]
+          self._ctx.queue = self._ctx.queue[1:]
+          self._ctx.input = n
+          self._feed(n)
+        d = self._ctx.delay_queue[0]
         self._ctx.delay_queue = self._ctx.delay_queue[1:]
-        if isinstance(n, Var):
-          self._fsm.var(self._ctx, n)
-        elif isinstance(n, Type):
-          self._fsm.type(self._ctx, n)
-        elif isinstance(n, UnionType):
-          self._fsm.union_type(self._ctx, n)
-        elif isinstance(n, ListType):
-          self._fsm.list_type(self._ctx, n)
-        elif isinstance(n, MapType):
-          self._fsm.map_type(self._ctx, n)
-        elif isinstance(n, Parameter):
-          self._fsm.parameter(self._ctx, n)
-        elif isinstance(n, list):
-          self._fsm.parameters(self._ctx, n)
-        elif isinstance(n, int):
-          self._fsm.eof(self._ctx, n)
+        self._ctx.input = d
+        self._feed(d)
+
+    def _feed(self, n):
+      if isinstance(n, Var):
+        self._fsm.var(self._ctx, n)
+      elif isinstance(n, Type):
+        self._fsm.type(self._ctx, n)
+      elif isinstance(n, UnionType):
+        self._fsm.union_type(self._ctx, n)
+      elif isinstance(n, ListType):
+        self._fsm.list_type(self._ctx, n)
+      elif isinstance(n, MapType):
+        self._fsm.map_type(self._ctx, n)
+      elif isinstance(n, Parameter):
+        self._fsm.parameter(self._ctx, n)
+      elif isinstance(n, list):
+        self._fsm.parameters(self._ctx, n)
+      elif isinstance(n, int):
+        self._fsm.eof(self._ctx, n)
 
 
   <<parameter-adapter>>
@@ -1837,6 +1835,7 @@
       self.state_stack = []
       self.stack = []
       self.parameters = []
+      self.input = None
 #+end_src
 *** delegate
 #+begin_src python :noweb-ref parameter-delegate
@@ -1853,6 +1852,10 @@
 
     def syntax_error(self, ctx):
       print("syntax error in parameter syntaxer")
+      print("current state: %d" % ctx.fsm.state)
+      print("stack: %s" % ctx.stack)
+      print("state stack: %s" % ctx.state_stack)
+      print("input: %s" % ctx.input)
 
     def quit(self, ctx):
       exit(1)
@@ -1903,7 +1906,7 @@
     def enqueue(self, ctx, e):
       ctx.delay_queue.append(e)
 
-    def reduce_to_union_type(self, ctx):
+    def reduce_to_uniontype(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
       a = ctx.stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
@@ -1919,7 +1922,7 @@
         u.types.append(a)
         ctx.queue.append(u)
 
-    def reduce_to_list_type(self, ctx):
+    def reduce_to_listtype(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
       ctx.stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
@@ -1928,7 +1931,7 @@
       ctx.stack.pop()
       ctx.queue.append(ListType(type))
 
-    def reduce_to_map_type(self, ctx):
+    def reduce_to_maptype(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
       ctx.stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
@@ -8246,9 +8249,6 @@
   def find_call_in_expression(exp: Expression):
     if isinstance(exp, Call):
       yield exp
-    elif isinstance(exp, BoolExpression):
-      for x in find_call_in_expression(exp.expr):
-        yield x
     elif isinstance(exp, BinaryBoolExpression):
       for x in find_call_in_expression(exp.left):
         yield x
@@ -8262,4 +8262,10 @@
         yield x
       for y in find_call_in_expression(exp.right):
         yield y
+    elif isinstance(exp, BoolExpression):
+      for x in find_call_in_expression(exp.expr):
+        yield x
+    elif isinstance(exp, Expression):
+      for x in find_call_in_expression(exp.entity):
+        yield x
 #+end_src

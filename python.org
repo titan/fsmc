@@ -4,7 +4,7 @@
 #+begin_src python :tangle ${BUILDDIR}/python.py
   from typing import List, Mapping
   from model import Event, Parameter, State, Transaction, Variable
-  from semantic import Assignment, Call, Identifier
+  from semantic import Assignment, Call, Identifier, CompareExpression, Expression, BoolExpression
   from analyzer import find_call_in_expression
   from utility import normalize
 
@@ -14,9 +14,14 @@
 ** exporter
 *** basic
 #+begin_src python :noweb-ref exporter
+  <<utility>>
+
   <<save-states>>
+
   <<save-delegates>>
+
   <<save-state-machine>>
+
   def save(dst: str, variables: List[Variable], states: List[State]):
     import os.path
     if dst.endswith('python'):
@@ -70,7 +75,7 @@
       if len(str(action.operator)) == 0:
         continue
       code += ' ' * 2 + '@abstractmethod\n'
-      code += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(str(action.operator).replace('_', ' ').replace('-', ' ')).lower(), ', '.join(['ctx'] + [str(x).lower() for x in action.operands]))
+      code += ' ' * 2 + 'def %s(self, %s):\n' % (_python_normalize(str(action.operator)), ', '.join(['ctx'] + [str(x).lower() for x in action.operands]))
       code += ' ' * 4 + 'return NotImplemented\n\n'
       count += 1
     if count == 0:
@@ -80,14 +85,23 @@
 **** guard delegate
 #+begin_src python :noweb-ref guard-delegate
   def _save_guard_delegate(states: List[State]) -> str:
+    calls = {}
     for state in states:
       for transaction in state.transactions:
         guard = transaction.guard
-        for call in find_call_in_expression(guard):
-          print(call)
+        if guard:
+          for call in find_call_in_expression(guard.expr):
+            calls[str(call)] = call
 
+    count = 0
     code = 'class GuardDelegate(ABC):\n\n'
-    code += ' ' * 2 + 'pass\n'
+    for call in calls.values():
+      code += ' ' * 2 + '@abstractmethod\n'
+      code += ' ' * 2 + 'def %s(self, %s):\n' % (_python_normalize(str(call.operator)), ', '.join(['ctx'] + [str(x).lower() for x in call.operands]))
+      code += ' ' * 4 + 'return NotImplemented\n\n'
+      count += 1
+    if count == 0:
+      code += ' ' * 2 + 'pass\n'
     return code + '\n'
 #+end_src
 **** variable delegate
@@ -124,7 +138,7 @@
           guardmappings[str(transaction.guard)] = transaction
         else:
           guardmappings[''] = transaction
-      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (normalize(event.name).lower(), ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
+      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (_python_normalize(event.name), ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
       guards = [x for x in guardmappings.keys()]
       if len(guards) == 1 and guards[0] == '':
         event_tag = normalize(event.name)
@@ -138,12 +152,15 @@
         extended_events[event_tag] = None
       else:
         firstline = True
-        for guard in guards:
-          if guard == '':
+        for guardstr in guards:
+          if guardstr == '':
             continue
-          firstline = False
-          transaction = guardmappings[guard]
-          eventimpl += ' ' * 4 + ('el' if firstline else '') + 'if %s:\n' % str(guard)
+          transaction = guardmappings[guardstr]
+          guard = transaction.guard
+          if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+            eventimpl += ' ' * 4 + ('el' if not firstline else '') + 'if self.guard_delegate.%s:\n' % str(guard)
+          else:
+            eventimpl += ' ' * 4 + ('el' if not firstline else '') + 'if %s:\n' % str(guard)
           event_tag = normalize(event.name) + '_' + normalize(str(guard))
           eventimpl += ' ' * 6 + 'if self.state == _transactions_target[self.state][self.%s]:\n' % event_tag
           eventimpl += ' ' * 8 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
@@ -153,6 +170,7 @@
           eventimpl += ' ' * 10 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
           eventimpl += ' ' * 8 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
           extended_events[event_tag] = None
+          firstline = False
         if '' in guards:
           eventimpl += ' ' * 4 + 'else:\n'
           event_tag = normalize(event.name)
@@ -197,7 +215,7 @@
                 args = ''.join([str(x) for x in transaction.actions[0].operands])
                 params = ''.join([str(x.name) for x in transaction.event.parameters])
                 if args == params:
-                  action = 'self.action_delegate.%s' % normalize(str(transaction.actions[0].operator).replace('-', ' ').replace('_', ' ' )).lower()
+                  action = 'self.action_delegate.%s' % _python_normalize(str(transaction.actions[0].operator))
                   found_action = True
                 else:
                   actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transaction.event.parameters]) + '\n' + str(transaction.actions[0])
@@ -265,17 +283,17 @@
         actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [str(x.name).lower() for x in transaction.event.parameters]))
         for action in transaction.actions:
           if isinstance(action, Call):
-            actionimpl += ' ' * 6 + 'self.action_delegate.%s(%s)\n' % (normalize(str(action.operator).replace('-', ' ').replace('_', ' ')).lower(), ', '.join(['ctx'] + [str(x) for x in action.operands]))
+            actionimpl += ' ' * 6 + 'self.action_delegate.%s(%s)\n' % (_python_normalize(str(action.operator)), ', '.join(['ctx'] + [str(x) for x in action.operands]))
           elif isinstance(action, Assignment):
             if isinstance(action.expression, Identifier):
-              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), str(action.expression))
+              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
               actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
             elif isinstance(action.expression, Call):
               call = action.expression
-              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(%s)\n' % (str(action.target), str(call.operator), ', '.join(['ctx'] + [str(x) for x in call.operands]))
+              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(%s)\n' % (str(action.target), _python_normalize(str(call.operator)), ', '.join(['ctx'] + [str(x) for x in call.operands]))
               actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
             else:
-              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), normalize(action.expression.replace('-', ' ').replace('_', ' ')).lower())
+              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
               actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
         actionimpl += '\n'
     code = '_transactions_target = [%s]\n\n\n' % (', '.join(targetstable))
@@ -297,3 +315,13 @@
 | extended_events | Mapping[str, Transaction]         | key is event + guards |
 | guardmappings   | Mapping[str, Transaction]         | key is guard          |
 | actionblocks    | Mapping[str, Tuple[str, bool]]    | key is actionblock    |
+*** utility
+#+begin_src python :noweb-ref utility
+  def _python_normalize(string: str) -> str:
+    keywords = [ "False","None","True","and","as","assert","async","await","break","class","continue","def","del","elif","else","except","finally","for","from","global","if","import","in","is","lambda","nonlocal","not","or","pass","raise","return","try","while","with","yield" ]
+    result = normalize(string.replace('-', ' ').replace('_', ' ')).lower()
+    if result in keywords:
+      return 'my_' + result
+    else:
+      return result
+#+end_src

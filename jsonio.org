@@ -15,8 +15,11 @@
 *** basic
 #+begin_src python :noweb-ref importer
   <<parse-variables>>
+
   <<parse-events>>
+
   <<parse-states>>
+
   def load(src: str) -> Tuple[List[Variable], List[State]]:
     with open(src, 'r') as f:
       data = json.loads(f.read())
@@ -31,6 +34,7 @@
 *** parse variables
 #+begin_src python :noweb-ref parse-variables
   <<verify-variable>>
+
   def _parse_variables(data: Mapping[str, str]) -> List[Variable]:
     variables = []
     for v in data:
@@ -245,7 +249,7 @@
           actions = []
           for action in obj.actions:
             if isinstance(action, Assignment):
-              actions.append('%s = %s' % (str(action.target), str(action.expression)))
+              actions.append('%s = %s' % (str(action.target), str(action.expression).replace('()', '')))
             elif isinstance(action, Call):
               if len(action.operands) > 0:
                 actions.append(str(action))
