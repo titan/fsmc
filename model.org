@@ -4,7 +4,7 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/model.py
   from typing import List, NewType, Union
-  from semantic import Assignment, Call, Identifier, Type
+  from semantic import Assignment, Call, Identifier, Type, BoolExpression
 
 
   <<parameter>>
@@ -88,7 +88,7 @@
 #+begin_src python :noweb-ref transaction
   class Transaction:
     event: Event
-    guard: str
+    guard: BoolExpression
     actions: List[Union[Assignment, Call]]
     target: State
 

@@ -263,7 +263,7 @@
             tmp = []
             for x in actions:
               if isinstance(x, Assignment):
-                tmp.append('%s: %s = %s' % (str(x.target), str(x.type), str(x.expression)))
+                tmp.append('%s: %s = %s' % (str(x.target), str(x.type), str(x.expression).replace('()', '')))
               else:
                 tmp.append(str(x).replace('()', ''))
             content += '\n'.join(tmp)

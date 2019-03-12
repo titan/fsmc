@@ -1,17 +1,16 @@
 #+TODO: TODO INPROGRESS | DONE
 #+STARTUP: indent
-* core logic [66%]
-** INPROGRESS Data model [83%]
+* core logic [100%]
+** DONE Data model [100%]
 *** DONE Parameter
 *** DONE Event
 *** DONE State
 *** DONE Transaction
-*** TODO Guard
 *** DONE Variable
 ** DONE Build system
 ** DONE Framework
-* importer [33%]
-** INPROGRESS JSON [75%]
+* importer [66%]
+** DONE JSON [100%]
 *** DONE basic framework
 *** DONE parse events
 *** DONE parse variables
@@ -21,9 +20,7 @@
 *** DONE verify event
 *** DONE verify variable
 *** DONE verify transaction
-*** TODO apply parameter syntaxer
-*** TODO apply guard syntaxer
-*** TODO apply action syntaxer
+*** DONE apply action syntaxer
 ** TODO Plantuml
 ** DONE Excel [100%]
 *** DONE basic framework
@@ -37,11 +34,11 @@
 *** DONE apply parameter syntaxer
 *** DONE apply guard syntaxer
 *** DONE apply action syntaxer
-* exporter [50%]
-** INPROGRESS Python [85%]
+* exporter [75%]
+** DONE Python [100%]
 *** DONE basic framework
 *** DONE states
-*** INPROGRESS action delegate
+*** DONE action delegate
 *** DONE guard delegate
 *** DONE variable delegate
 *** DONE state machine
