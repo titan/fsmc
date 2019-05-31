@@ -1,0 +1,417 @@
+#+STARTUP: indent
+* Table
+** framework
+#+begin_src python :tangle ${BUILDDIR}/table.py
+  from typing import List, Mapping, Tuple, Union
+  from model import Event, Parameter, State, Transaction, Variable
+  from semantic import Assignment, Call, Expression, Identifier
+  from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
+  from lexer import Lexer
+  from table_fsm import Delegate as TableDelegate, StateMachine
+  import re
+
+  <<importer>>
+
+  <<exporter>>
+#+end_src
+** importer
+*** basic
+#+begin_src python :noweb-ref importer
+  <<parse-events>>
+
+  <<parse-states>>
+
+  <<table-parser>>
+
+  def load(src: str) -> Tuple[List[Variable], List[State]]:
+    with open(src, 'r') as f:
+      c = f.read()
+      model = _reader(c)
+    events = _parse_events(model)
+    (variables, states) = _parse_states(model, events)
+    return (variables, states)
+#+end_src
+*** parsing fsm
+**** basic
+#+begin_src python :noweb-ref table-parser
+  <<table-fsm-ctx>>
+
+  <<table-fsm-action>>
+
+  def _reader(src):
+      ctx = _TableContext()
+      fsm = StateMachine(_MyTableDelegate())
+      for ch in src:
+          ctx.ch = ch
+          if ch == '\n':
+              ctx.line += 1
+              ctx.col = 1
+              fsm.lf(ctx)
+          elif ch == '+':
+              fsm.plus(ctx)
+              ctx.col += 1
+          elif ch == '-':
+              fsm.minus(ctx)
+              ctx.col += 1
+          elif ch == '|':
+              fsm.pipe(ctx)
+              ctx.col += 1
+          else:
+              fsm.others(ctx)
+              ctx.col += 1
+      return ctx.rows
+#+end_src
+**** defination
+#+begin_src text :tangle ${BUILDDIR}/table_fsm.txt
+  +-------------+-------------+--------+----------+--------+-------------+
+  | state\event | PLUS        | MINUS  | PIPE     | OTHERS | LF          |
+  +-------------+-------------+--------+----------+--------+-------------+
+  |             | ----        | error  | ----     | error  |             |
+  | READY       | ROW SPLITOR | ----   | ROW LINE | ----   |             |
+  +-------------+-------------+--------+----------+--------+-------------+
+  |             |             |        | error    | error  | ----        |
+  | ROW SPLITOR |             |        | ----     | ----   | READY       |
+  +-------------+-------------+--------+----------+--------+-------------+
+  |             |             |        |          |        | line        |
+  |             | append      | append | cell     | append | ----        |
+  | ROW LINE    | ----        | ----   | ----     | ----   | ROW LINE LF |
+  +-------------+-------------+--------+----------+--------+-------------+
+  |             | row         |        |          |        |             |
+  |             | ----        | error  | ----     | error  |             |
+  | ROW LINE LF | ROW SPLITOR | ----   | ROW LINE | ----   |             |
+  +-------------+-------------+--------+----------+--------+-------------+
+#+end_src
+**** data structure
+#+begin_src python :noweb-ref table-fsm-ctx
+  class _TableContext:
+      def __init__(self):
+          self.buf = ""
+          self.tmp = ""
+          self.ch = None
+          self.line = 1
+          self.col = 1
+          self.cells = []
+          self.lines = []
+          self.rows = []
+#+end_src
+**** action
+#+begin_src python :noweb-ref table-fsm-action
+  class _MyTableDelegate(TableDelegate):
+      def error(self, ctx, state = 0, event = 0):
+          print("Invalid table format at col %d in line %d" % (ctx.col, ctx.line))
+          exit(-1)
+      def append(self, ctx, state = 0, event = 0):
+          ctx.buf += ctx.ch
+      def cell(self, ctx, state = 0, event = 0):
+          ctx.cells.append(ctx.buf.strip())
+          ctx.buf = ''
+      def line(self, ctx, state = 0, event = 0):
+          ctx.lines.append(ctx.cells)
+          ctx.cells = []
+      def row(self, ctx, state = 0, event = 0):
+          cells = []
+          for i in range(len(ctx.lines[0])):
+              cells.append([])
+          for row in range(len(ctx.lines)):
+              for col in range(len(ctx.lines[row])):
+                  if len(ctx.lines[row][col]) > 0:
+                      cells[col].append(ctx.lines[row][col])
+          row = []
+          for cell in cells:
+              if len(cell) > 0:
+                  content = '\n'.join(cell)
+                  if content.startswith('----') or content.startswith('===='):
+                      content = '\n' + content
+                  if content.endswith('----') or content.endswith('===='):
+                      content += '\n'
+                  row.append(content)
+              else:
+                  row.append(None)
+          row = []
+          for c in cells:
+              row.append('\n'.join(c))
+          ctx.rows.append(row)
+          ctx.lines = []
+#+end_src
+*** parse events
+#+begin_src python :noweb-ref parse-events
+  <<verify-parameter>>
+
+  <<verify-event>>
+
+  def _parse_events(rows) -> List[Tuple[Event, str]]:
+    uniqevents = {}
+    events = []
+    headers = rows[0]
+    for i in range(1, len(headers)):
+      header = headers[i]
+      if not header:
+        continue
+      guard = None
+      parameters = []
+      result = re.search('(.*)\((.*)\)\[(.*)\]', header)
+      if result:
+        eventname = result.group(1).strip()
+
+        syntaxer = ParameterSyntaxer()
+        lexer = Lexer(ParameterLexerAdapter(syntaxer))
+        for ch in result.group(2):
+          lexer.feed(ch)
+        lexer.eof()
+        syntaxer.eof()
+        parameters = syntaxer.result()
+
+        syntaxer = GuardSyntaxer()
+        lexer = Lexer(GuardLexerAdapter(syntaxer))
+        for ch in result.group(3):
+          lexer.feed(ch)
+        lexer.eof()
+        syntaxer.eof()
+        guard = syntaxer.result()
+      else:
+        result = re.search('(.*)\((.*)\)', header)
+        if result:
+          eventname = result.group(1).strip()
+          syntaxer = ParameterSyntaxer()
+          lexer = Lexer(ParameterLexerAdapter(syntaxer))
+          for ch in result.group(2):
+            lexer.feed(ch)
+          lexer.eof()
+          syntaxer.eof()
+          parameters = syntaxer.result()
+        else:
+          eventname = header.strip()
+      if eventname not in uniqevents:
+        event = Event()
+        event.name = eventname
+        for parameter in parameters:
+          event.parameters.append(_verify_parameter(parameter, header))
+        uniqevents[eventname] = event
+      else:
+        event = uniqevents[eventname]
+      events.append((_verify_event(event, header), guard))
+    return events
+#+end_src
+**** verify-parameter
+#+begin_src python :noweb-ref verify-parameter
+  def _verify_parameter(p: Parameter, d) -> Parameter:
+    if not p.name:
+      print('Missing name in parameter: %s' % d)
+      exit(1)
+    if not p.type:
+      print('Missing type in parameter: %s' % d)
+      exit(1)
+    return p
+#+end_src
+**** verify-event
+#+begin_src python :noweb-ref verify-event
+  def _verify_event(e: Event, d) -> Event:
+    if not e.name:
+      print('Missing name in event: %s' % d)
+      exit(1)
+    else:
+      return e
+#+end_src
+*** parse states
+#+begin_src python :noweb-ref parse-states
+  <<verify-transaction>>
+
+  def _parse_states(rows, headers: List[Tuple[Event, str]]) -> List[State]:
+    states = []
+    variables = {}
+    isheader = True
+    for row in rows:
+      if isheader:
+        isheader = False
+        continue
+      state = State()
+      if row[0].count('.') != 0:
+        continue
+      state.name = row[0]
+      for j in range(1, len(row)):
+        transaction = Transaction()
+        transaction._targetstrs = []
+        transaction._targetstr = None
+        cell = row[j]
+        if cell:
+          transaction.event = headers[j - 1][0]
+          transaction.guard = headers[j - 1][1]
+          lines = cell.split('\n')
+          state_mode = False
+          for line in lines:
+            if line == '----':
+              state_mode = True
+              continue
+            if not state_mode:
+              if len(line) == 0:
+                continue
+              syntaxer = ActionSyntaxer()
+              lexer = Lexer(ActionLexerAdapter(syntaxer))
+              for ch in line:
+                lexer.feed(ch)
+              lexer.eof()
+              syntaxer.eof()
+              transaction.actions.append(syntaxer.result())
+              if isinstance(syntaxer.result(), Assignment):
+                assignment = syntaxer.result()
+                variables[str(assignment.target) + str(assignment.type)] = Variable(str(assignment.target), str(assignment.type))
+                if isinstance(assignment.expression, Call):
+                  assignment.expression.type = assignment.type
+            else:
+              transaction._targetstrs.append(line)
+          if len(transaction._targetstrs) > 0:
+            transaction._targetstr = '\n'.join(transaction._targetstrs)
+          state.transactions.append(transaction)
+      states.append(state)
+    for state in states:
+      for t in state.transactions:
+        _verify_transaction(t, states)
+    return ([x for x in variables.values()], states)
+#+end_src
+**** verify transaction
+#+begin_src python :noweb-ref verify-transaction
+  def _verify_transaction(t: Transaction, states: List[State]):
+    if t._targetstr:
+      for state in states:
+        if t._targetstr == state.name:
+          t.target = state
+          break
+      if not t.target:
+        print('Undefined target: %s' % t._targetstr)
+        exit(1)
+    if len(t.actions) > 0:
+      for action in t.actions:
+        if isinstance(action, Assignment):
+          pass
+        elif isinstance(action, Call):
+          for arg in action.operands:
+            if not isinstance(arg, Identifier):
+              continue
+            found: bool = False
+            for param in t.event.parameters:
+              if str(arg) == str(param.name):
+                found = True
+                break
+            if not found:
+              print('Undefined action arguments "%s" in action: %s' % (arg, action))
+              exit(1)
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<export-headers>>
+
+  <<export-content>>
+
+  def _save(model, dst: str):
+    maxwidths = [0] * len(model[0])
+    for i in range(len(model)):
+      for j in range(len(model[i])):
+        if model[i][j]:
+          celllen = max(map(lambda x: len(x), model[i][j].split('\n')))
+        else:
+          celllen = 0
+        celllen = (celllen + 2) if celllen > 0 else 1
+        if celllen > maxwidths[j]:
+          maxwidths[j] = celllen
+    linesplitor = '+%s+' % '+'.join(map(lambda x: '-' * x if x > 0 else '-', maxwidths))
+    with open(dst, 'w') as out:
+      out.write(linesplitor + '\n')
+      for i in range(len(model)):
+        maxline = 0
+        for j in range(len(model[i])):
+          cell = model[i][j]
+          linecnt = len(cell.split('\n')) if cell else 0
+          if linecnt > maxline:
+            maxline = linecnt
+        row = []
+        for j in range(len(model[i])):
+          cell = model[i][j]
+          lines = cell.split('\n') if cell else []
+          if len(lines) < maxline:
+            row.append([''] * (maxline - len(lines)) + lines)
+          else:
+            row.append(lines)
+        for k in range(maxline):
+          ln = []
+          for j in range(len(model[i])):
+            ln.append(' ' + row[j][k].ljust(maxwidths[j] - 1))
+          out.write('|%s|\n' % '|'.join(ln))
+        out.write(linesplitor + '\n')
+
+  def save(dst: str, variables: List[Variable], states: List[State]):
+    import os.path
+    if dst.endswith('table'):
+      dst = dst[:-5] + 'txt'
+
+    model = []
+    pairs = {}
+    idx = 0
+    for state in states:
+      for transaction in state.transactions:
+        event = transaction.event
+        key = str(event) + str(transaction.guard)
+        if key not in pairs:
+          pairs[str(event) + str(transaction.guard)] = (idx, event, transaction.guard)
+          idx += 1
+    headers = [x for x in pairs.values()]
+    headers.sort()
+    _export_headers(model, headers)
+    rows = []
+    for state in states:
+      row = [state]
+      for (_, event, guard) in headers:
+        found = False
+        for transaction in state.transactions:
+          if event == transaction.event and (str(guard) == str(transaction.guard)):
+            row.append((transaction.target if transaction.target != state else None, transaction.actions))
+            found = True
+            break
+        if not found:
+          row.append((None, None))
+      rows.append(row)
+    _export_content(model, rows)
+    _save(model, dst)
+#+end_src
+*** export headers
+#+begin_src python :noweb-ref export-headers
+  def _export_headers(model, values: List[Tuple[int, Event, Expression]]):
+    headers = []
+    for (_, event, guard) in values:
+      header = ''
+      if len(event.parameters) > 0:
+        header += '%s(%s)' % (event.name, ', '.join(['%s: %s' % (x.name, x.type) for x in event.parameters]))
+      else:
+        header += '%s' % (event.name)
+      if guard:
+        header += '[%s]' % str(guard)
+      headers.append(header)
+    model.append(['state\event'] + headers)
+#+end_src
+*** export content
+#+begin_src python :noweb-ref export-content
+  def _export_content(model, values: List[List[Union[State, Tuple[State, List[Union[Assignment, Expression]]]]]]):
+    for line in values:
+      row = []
+      for cell in line:
+        if isinstance(cell, State):
+          row.append(cell.name)
+        elif isinstance(cell, tuple):
+          (state, actions) = cell
+          content = ''
+          if actions:
+            tmp = []
+            for x in actions:
+              if isinstance(x, Assignment):
+                tmp.append('%s: %s = %s' % (str(x.target), str(x.type), str(x.expression).replace('()', '')))
+              else:
+                tmp.append(str(x).replace('()', ''))
+            content += '\n'.join(tmp)
+          content += '\n----\n'
+          if state:
+            content += state.name
+          if content == '\n----\n':
+            content = None
+          row.append(content)
+      model.append(row)
+#+end_src

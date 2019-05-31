@@ -19,12 +19,15 @@
   import jsonio
   import python
   import excel
+  import table
 
   importers = {
     'json': jsonio.load,
     'excel': excel.load,
     'xls': excel.load,
     'xlsx': excel.load,
+    'txt': table.load,
+    'table': table.load,
   }
 
   exporters = {
@@ -34,6 +37,8 @@
     'excel': excel.save,
     'xls': excel.save,
     'xlsx': excel.save,
+    'table': table.save,
+    'txt': table.save,
   }
 
   def main(args):
