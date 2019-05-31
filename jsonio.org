@@ -159,6 +159,8 @@
                 if var.name == str(assignment.target):
                   found = True
                   assignment.type = Identifier(var.type)
+                  if isinstance(assignment.expression, Call):
+                    assignment.expression.type = assignment.type
               if not found:
                 print('Variable %s in action "%s" not found' % (str(assignment.target), str(assignment)))
                 exit(1)

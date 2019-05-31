@@ -6768,7 +6768,7 @@
     def reduce_1_to_operands(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
       expr = ctx.stack.pop()
-      ctx.queue.append([expr])
+      ctx.queue.append([expr.entity])
 
     def reduce_3_to_operands(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
@@ -6777,7 +6777,7 @@
       ctx.stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
       operands = ctx.stack.pop()
-      operands.append(expr)
+      operands.append(expr.entity)
       ctx.queue.append(operands)
 
     def reduce_to_accessor(self, ctx):

@@ -101,9 +101,9 @@
   class Call():
     operator: Identifier
     operands: List[Union[Identifier, Literal]]
-    type: str
+    type: Identifier
 
-    def __init__(self, operator: Identifier = None, operands: List[Union[Identifier, Literal]] = [], type: str = None):
+    def __init__(self, operator: Identifier = None, operands: List[Union[Identifier, Literal]] = [], type: Identifier = None):
       self.operator = operator
       self.operands = operands
       self.type = type

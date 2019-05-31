@@ -152,6 +152,8 @@
               if isinstance(syntaxer.result(), Assignment):
                 assignment = syntaxer.result()
                 variables[str(assignment.target) + str(assignment.type)] = Variable(str(assignment.target), str(assignment.type))
+                if isinstance(assignment.expression, Call):
+                  assignment.expression.type = assignment.type
             else:
               transaction._targetstrs.append(line)
           if len(transaction._targetstrs) > 0:
@@ -180,6 +182,8 @@
           pass
         elif isinstance(action, Call):
           for arg in action.operands:
+            if not isinstance(arg, Identifier):
+              continue
             found: bool = False
             for param in t.event.parameters:
               if str(arg) == str(param.name):
