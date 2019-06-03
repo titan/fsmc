@@ -54,7 +54,13 @@
               fsm.minus(ctx)
               ctx.col += 1
           elif ch == '|':
-              fsm.pipe(ctx)
+              splitors = [1]
+              for cellwidth in ctx.cellwidths:
+                  splitors.append(splitors[-1] + cellwidth + 1)
+              if ctx.col in splitors:
+                  fsm.pipe(ctx)
+              else:
+                  fsm.pipe_in_cell(ctx)
               ctx.col += 1
           else:
               fsm.others(ctx)
@@ -63,23 +69,28 @@
 #+end_src
 **** defination
 #+begin_src text :tangle ${BUILDDIR}/table_fsm.txt
-  +-------------+-------------+--------+----------+--------+-------------+
-  | state\event | PLUS        | MINUS  | PIPE     | OTHERS | LF          |
-  +-------------+-------------+--------+----------+--------+-------------+
-  |             | ----        | error  | ----     | error  |             |
-  | READY       | ROW SPLITOR | ----   | ROW LINE | ----   |             |
-  +-------------+-------------+--------+----------+--------+-------------+
-  |             |             |        | error    | error  | ----        |
-  | ROW SPLITOR |             |        | ----     | ----   | READY       |
-  +-------------+-------------+--------+----------+--------+-------------+
-  |             |             |        |          |        | line        |
-  |             | append      | append | cell     | append | ----        |
-  | ROW LINE    | ----        | ----   | ----     | ----   | ROW LINE LF |
-  +-------------+-------------+--------+----------+--------+-------------+
-  |             | row         |        |          |        |             |
-  |             | ----        | error  | ----     | error  |             |
-  | ROW LINE LF | ROW SPLITOR | ----   | ROW LINE | ----   |             |
-  +-------------+-------------+--------+----------+--------+-------------+
+  +-------------+--------------+------------+--------------+------------------+--------+-------------+
+  | state\event | PLUS         | MINUS      | PIPE in cell | PIPE             | OTHERS | LF          |
+  +-------------+--------------+------------+--------------+------------------+--------+-------------+
+  |             |              | error      |              | reset cell index | error  |             |
+  |             | ----         | ----       | ----         | ----             | ----   |             |
+  | READY       | ROW SPLITOR  |            | ROW LINE     | ROW LINE         |        |             |
+  +-------------+--------------+------------+--------------+------------------+--------+-------------+
+  |             | append width |            |              |                  |        |             |
+  |             | reset width  | incr width | error        | error            | error  |             |
+  |             | ----         | ----       | ----         | ----             | ----   | ----        |
+  | ROW SPLITOR |              |            |              |                  |        | READY       |
+  +-------------+--------------+------------+--------------+------------------+--------+-------------+
+  |             |              |            |              | cell             |        |             |
+  |             | append       | append     | append       | incr cell index  | append | line        |
+  |             | ----         | ----       | ----         | ----             | ----   | ----        |
+  | ROW LINE    |              |            |              |                  |        | ROW LINE LF |
+  +-------------+--------------+------------+--------------+------------------+--------+-------------+
+  |             | row          |            |              |                  |        |             |
+  |             | clear widths | error      |              |                  | error  |             |
+  |             | ----         | ----       | ----         | ----             | ----   |             |
+  | ROW LINE LF | ROW SPLITOR  |            | ROW LINE     | ROW LINE         |        |             |
+  +-------------+--------------+------------+--------------+------------------+--------+-------------+
 #+end_src
 **** data structure
 #+begin_src python :noweb-ref table-fsm-ctx
@@ -93,6 +104,9 @@
           self.cells = []
           self.lines = []
           self.rows = []
+          self.cellwidths = []
+          self.cellwidth = 0
+          self.cellindex = 0
 #+end_src
 **** action
 #+begin_src python :noweb-ref table-fsm-action
@@ -100,11 +114,21 @@
       def error(self, ctx, state = 0, event = 0):
           print("Invalid table format at col %d in line %d" % (ctx.col, ctx.line))
           exit(-1)
+      def reset_cell_index(self, ctx):
+          ctx.cellindex = 0
+      def append_width(self, ctx):
+          ctx.cellwidths.append(ctx.cellwidth)
+      def reset_width(self, ctx):
+          ctx.cellwidth = 0
+      def incr_width(self, ctx):
+          ctx.cellwidth += 1
       def append(self, ctx, state = 0, event = 0):
           ctx.buf += ctx.ch
       def cell(self, ctx, state = 0, event = 0):
           ctx.cells.append(ctx.buf.strip())
           ctx.buf = ''
+      def incr_cell_index(self, ctx):
+          ctx.cellindex += 1
       def line(self, ctx, state = 0, event = 0):
           ctx.lines.append(ctx.cells)
           ctx.cells = []
@@ -132,6 +156,8 @@
               row.append('\n'.join(c))
           ctx.rows.append(row)
           ctx.lines = []
+      def clear_widths(self, ctx):
+          ctx.cellwidths = []
 #+end_src
 *** parse events
 #+begin_src python :noweb-ref parse-events
