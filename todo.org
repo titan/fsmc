@@ -5,7 +5,7 @@
 *** DONE Parameter
 *** DONE Event
 *** DONE State
-*** DONE Transaction
+*** DONE Transition
 *** DONE Variable
 ** DONE Build system
 ** DONE Framework
@@ -15,11 +15,11 @@
 *** DONE parse events
 *** DONE parse variables
 *** DONE parse states
-*** DONE parse transactions
+*** DONE parse transitions
 *** DONE verify parameter
 *** DONE verify event
 *** DONE verify variable
-*** DONE verify transaction
+*** DONE verify transition
 *** DONE apply action syntaxer
 ** TODO Plantuml
 ** DONE Excel [100%]
@@ -30,7 +30,7 @@
 *** DONE verify variable
 *** DONE verify parameter
 *** DONE verify event
-*** DONE verify transaction
+*** DONE verify transition
 *** DONE apply parameter syntaxer
 *** DONE apply guard syntaxer
 *** DONE apply action syntaxer
@@ -50,7 +50,7 @@
 **** DONE Parameter
 **** DONE State
 **** DONE Action
-**** DONE Transaction
+**** DONE Transition
 **** DONE Call
 **** DONE Assignment
 ** TODO Plantuml

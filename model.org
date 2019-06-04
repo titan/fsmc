@@ -17,11 +17,11 @@
 
 
   State = NewType('State', object)
-  Transaction = NewType('Transaction', object)
+  Transition = NewType('Transition', object)
   <<state>>
 
 
-  <<transaction>>
+  <<transition>>
 #+end_src
 ** parameter
 #+begin_src python :noweb-ref parameter
@@ -76,17 +76,17 @@
 #+begin_src python :noweb-ref state
   class State:
     name: str
-    transactions: List[Transaction]
+    transitions: List[Transition]
     substates = List[State]
 
     def __init__(self):
       self.name = None
-      self.transactions = []
+      self.transitions = []
       self.substates = []
 #+end_src
-** transaction
-#+begin_src python :noweb-ref transaction
-  class Transaction:
+** transition
+#+begin_src python :noweb-ref transition
+  class Transition:
     event: Event
     guard: BoolExpression
     actions: List[Union[Assignment, Call]]

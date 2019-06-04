@@ -3,7 +3,7 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/jsonio.py
   from typing import List, Mapping, Tuple
-  from model import Event, Parameter, State, Transaction, Variable
+  from model import Event, Parameter, State, Transition, Variable
   from semantic import Assignment, Call, Expression, Identifier
   from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
   from lexer import Lexer
@@ -104,8 +104,8 @@
 #+end_src
 *** parse states
 #+begin_src python :noweb-ref parse-states
-  <<parse-transactions>>
-  <<verify-transaction>>
+  <<parse-transitions>>
+  <<verify-transition>>
   def _parse_states(data: Mapping[str, str], variables: List[Variable], events: List[Event]) -> List[State]:
     states = []
     for s in data:
@@ -113,27 +113,27 @@
       for (k, v) in s.items():
         if k == 'name':
           state.name = v
-        elif k == 'transactions':
-          state.transactions = _parse_transactions(v, variables)
+        elif k == 'transitions':
+          state.transitions = _parse_transitions(v, variables)
         elif k == 'states':
           state.substates = _parse_states(v)
       states.append(state)
     for state in states:
-      for t in state.transactions:
-        _verify_transaction(t, states, variables, events)
+      for t in state.transitions:
+        _verify_transition(t, states, variables, events)
     return states
 #+end_src
-*** parse transactions
-#+begin_src python :noweb-ref parse-transactions
-  def _parse_transactions(data: Mapping[str, str], variables: List[Variable]) -> List[Transaction]:
-    transactions = []
+*** parse transitions
+#+begin_src python :noweb-ref parse-transitions
+  def _parse_transitions(data: Mapping[str, str], variables: List[Variable]) -> List[Transition]:
+    transitions = []
     for t in data:
-      transaction = Transaction()
-      transaction._eventstr = None
-      transaction._targetstr = None
+      transition = Transition()
+      transition._eventstr = None
+      transition._targetstr = None
       for (k, v) in t.items():
         if k == 'event':
-          transaction._eventstr = v
+          transition._eventstr = v
         elif k == 'guard':
           syntaxer = GuardSyntaxer()
           lexer = Lexer(GuardLexerAdapter(syntaxer))
@@ -141,7 +141,7 @@
             lexer.feed(ch)
           lexer.eof()
           syntaxer.eof()
-          transaction.guard = syntaxer.result()
+          transition.guard = syntaxer.result()
         elif k == 'actions':
           actions = v
           for action in actions:
@@ -151,7 +151,7 @@
               lexer.feed(ch)
             lexer.eof()
             syntaxer.eof()
-            transaction.actions.append(syntaxer.result())
+            transition.actions.append(syntaxer.result())
             if isinstance(syntaxer.result(), Assignment):
               assignment = syntaxer.result()
               found = False
@@ -165,13 +165,13 @@
                 print('Variable %s in action "%s" not found' % (str(assignment.target), str(assignment)))
                 exit(1)
         elif k == 'target':
-          transaction._targetstr = v
-      transactions.append(transaction)
-    return transactions
+          transition._targetstr = v
+      transitions.append(transition)
+    return transitions
 #+end_src
-**** verify transaction
-#+begin_src python :noweb-ref verify-transaction
-  def _verify_transaction(t: Transaction, states: List[State], variables: List[Variable], events: List[Event]):
+**** verify transition
+#+begin_src python :noweb-ref verify-transition
+  def _verify_transition(t: Transition, states: List[State], variables: List[Variable], events: List[Event]):
     if t._eventstr:
       for event in events:
         if event.name == t._eventstr:
@@ -213,11 +213,11 @@
 *** basic
 #+begin_src python :noweb-ref exporter
   <<json-encoder>>
-  def save(dst: str, variables: List[Variable], states: List[State]):
+  def save(dst: str, variables: List[Variable], states: List[State], args):
     events = {}
     for state in states:
-      for transaction in state.transactions:
-        events[str(transaction.event)] = transaction.event
+      for transition in state.transitions:
+        events[str(transition.event)] = transition.event
     data = {'variables': variables, 'events': [x for x in events.values()], 'states': states}
     with open(dst, 'w') as f:
       f.write(json.dumps(data, cls=ModelJSONEncoder, indent=2))
@@ -237,8 +237,8 @@
         data = { 'name': str(obj.name), 'type': str(obj.type) }
         return data
       if isinstance(obj, State):
-        return { 'name': obj.name, 'transactions': obj.transactions }
-      if isinstance(obj, Transaction):
+        return { 'name': obj.name, 'transitions': obj.transitions }
+      if isinstance(obj, Transition):
         data = {}
         if len(obj.actions) > 0:
           actions = []

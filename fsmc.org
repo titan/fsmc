@@ -45,7 +45,7 @@
     import os
     <<extract-arguments>>
     (variables, states) = importers[fronn](input)
-    exporters[to](output, variables, states)
+    exporters[to](output, variables, states, args)
 
   if __name__ == '__main__':
     import argparse
@@ -56,17 +56,19 @@
     main(args)
 #+end_src
 ** Command Line Arguments
-| argument | type   | usage                                                                   |
-|----------+--------+-------------------------------------------------------------------------|
-| --from   | string | specify the current from of the filename from which should be converted |
-| --to     | string | specify the format to which the filename should be converted            |
-| --output | string | specify the filename to save converted result                           |
-| input    | string | specify the filename to be converted                                    |
+| argument | type    | usage                                                                   |
+|----------+---------+-------------------------------------------------------------------------|
+| --from   | string  | specify the current from of the filename from which should be converted |
+| --to     | string  | specify the format to which the filename should be converted            |
+| --output | string  | specify the filename to save converted result                           |
+| --debug  | boolean | whether to output debug information                                     |
+| input    | string  | specify the filename to be converted                                    |
 
 #+begin_src python :noweb-ref argument-definations
   parser.add_argument('-f', '--from', dest='fronn', help='specify the current from of the filename from which should be converted')
   parser.add_argument('-t', '--to', help='specify the format to which the filename should be converted')
   parser.add_argument('-o', '--output', help='specify the filename to save converted result')
+  parser.add_argument('--debug', action='store_true', help='whether to output debug information')
   parser.add_argument('input', help='specify the filename to be converted')
 #+end_src
 *** Extract arguments

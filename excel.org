@@ -3,7 +3,7 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/excel.py
   from typing import List, Mapping, Tuple, Union
-  from model import Event, Parameter, State, Transaction, Variable
+  from model import Event, Parameter, State, Transition, Variable
   from semantic import Assignment, Call, Expression, Identifier
   from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
   from lexer import Lexer
@@ -111,7 +111,7 @@
 #+end_src
 *** parse states
 #+begin_src python :noweb-ref parse-states
-  <<verify-transaction>>
+  <<verify-transition>>
 
   def _parse_states(wx, headers: List[Tuple[Event, str]]) -> List[State]:
     states = []
@@ -126,13 +126,13 @@
         continue
       state.name = row[0].value
       for j in range(1, len(row)):
-        transaction = Transaction()
-        transaction._targetstrs = []
-        transaction._targetstr = None
+        transition = Transition()
+        transition._targetstrs = []
+        transition._targetstr = None
         cell = row[j]
         if cell.value:
-          transaction.event = headers[j - 1][0]
-          transaction.guard = headers[j - 1][1]
+          transition.event = headers[j - 1][0]
+          transition.guard = headers[j - 1][1]
           lines = cell.value.split('\n')
           state_mode = False
           for line in lines:
@@ -148,26 +148,26 @@
                 lexer.feed(ch)
               lexer.eof()
               syntaxer.eof()
-              transaction.actions.append(syntaxer.result())
+              transition.actions.append(syntaxer.result())
               if isinstance(syntaxer.result(), Assignment):
                 assignment = syntaxer.result()
                 variables[str(assignment.target) + str(assignment.type)] = Variable(str(assignment.target), str(assignment.type))
                 if isinstance(assignment.expression, Call):
                   assignment.expression.type = assignment.type
             else:
-              transaction._targetstrs.append(line)
-          if len(transaction._targetstrs) > 0:
-            transaction._targetstr = '\n'.join(transaction._targetstrs)
-          state.transactions.append(transaction)
+              transition._targetstrs.append(line)
+          if len(transition._targetstrs) > 0:
+            transition._targetstr = '\n'.join(transition._targetstrs)
+          state.transitions.append(transition)
       states.append(state)
     for state in states:
-      for t in state.transactions:
-        _verify_transaction(t, states)
+      for t in state.transitions:
+        _verify_transition(t, states)
     return ([x for x in variables.values()], states)
 #+end_src
-**** verify transaction
-#+begin_src python :noweb-ref verify-transaction
-  def _verify_transaction(t: Transaction, states: List[State]):
+**** verify transition
+#+begin_src python :noweb-ref verify-transition
+  def _verify_transition(t: Transition, states: List[State]):
     if t._targetstr:
       for state in states:
         if t._targetstr == state.name:
@@ -200,7 +200,7 @@
 
   <<export-content>>
 
-  def save(dst: str, variables: List[Variable], states: List[State]):
+  def save(dst: str, variables: List[Variable], states: List[State], args):
     from openpyxl import Workbook
     from openpyxl.styles import NamedStyle, Border, Side
     import os.path
@@ -212,11 +212,11 @@
     pairs = {}
     idx = 0
     for state in states:
-      for transaction in state.transactions:
-        event = transaction.event
-        key = str(event) + str(transaction.guard)
+      for transition in state.transitions:
+        event = transition.event
+        key = str(event) + str(transition.guard)
         if key not in pairs:
-          pairs[str(event) + str(transaction.guard)] = (idx, event, transaction.guard)
+          pairs[str(event) + str(transition.guard)] = (idx, event, transition.guard)
           idx += 1
     headers = [x for x in pairs.values()]
     headers.sort()
@@ -226,9 +226,9 @@
       row = [state]
       for (_, event, guard) in headers:
         found = False
-        for transaction in state.transactions:
-          if event == transaction.event and (str(guard) == str(transaction.guard)):
-            row.append((transaction.target if transaction.target != state else None, transaction.actions))
+        for transition in state.transitions:
+          if event == transition.event and (str(guard) == str(transition.guard)):
+            row.append((transition.target if transition.target != state else None, transition.actions))
             found = True
             break
         if not found:

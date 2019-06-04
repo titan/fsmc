@@ -9,7 +9,7 @@ TABLEFSM=table_fsm.py
 
 vpath %.org .
 vpath %.py $(BUILDDIR)
-vpath %.json $(BUILDDIR)
+vpath %.txt $(BUILDDIR)
 
 all: $(TARGET) $(SYMFSM) $(LEXFSM) $(TABLEFSM)
 	chmod 755 $(BUILDDIR)/fsmc.py
@@ -26,7 +26,7 @@ $(subst .py,.txt,$(TABLEFSM)): table.org
 $(SYMFSM): %.py: %.txt
 	fsmc.py $(addprefix $(BUILDDIR)/, $(notdir $<)) -t python
 
-$(subst .py,.txt,$(SYMFSM)): $(NAME).org
+$(subst .py,.txt,$(SYMFSM)): analyzer.org
 	sed 's/$$$\{BUILDDIR}/$(ESCAPED_BUILDDIR)/g' $< | org-tangle -
 
 $(LEXFSM): %.py: %.txt

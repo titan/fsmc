@@ -3,7 +3,7 @@
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/python.py
   from typing import List, Mapping
-  from model import Event, Parameter, State, Transaction, Variable
+  from model import Event, Parameter, State, Transition, Variable
   from semantic import Assignment, Call, Identifier, CompareExpression, Expression, BoolExpression
   from analyzer import find_call_in_expression
   from utility import normalize
@@ -22,7 +22,7 @@
 
   <<save-state-machine>>
 
-  def save(dst: str, variables: List[Variable], states: List[State]):
+  def save(dst: str, variables: List[Variable], states: List[State], args):
     import os.path
     if dst.endswith('python'):
       dst = dst[:-4]
@@ -31,18 +31,25 @@
     dst = os.path.join(path, name.replace(' ', '_').replace('-', '_') + ext)
     with open(dst, 'w') as f:
       f.write('from abc import ABC, abstractmethod\n\n')
-      f.write(_save_states(states))
-      f.write(_save_delegates(variables, states))
-      f.write(_save_state_machine(states))
+      f.write(_save_states(states, args.debug))
+      f.write(_save_delegates(variables, states, args.debug))
+      f.write(_save_state_machine(states, args.debug))
 #+end_src
 *** states
 #+begin_src python :noweb-ref save-states
-  def _save_states(states: List[State]) -> str:
+  def _save_states(states: List[State], debug = False) -> str:
     code = 'class State:\n'
-    i: int = 0
+    i: int = 1
+    names = []
     for state in states:
       code += '%s%s = %d\n' % (' ' * 2, normalize(state.name), i)
+      names.append(normalize(state.name))
       i += 1
+    if debug:
+      code += '\n\n'
+      code += '_state_strings = [\n'
+      code += '  {0}'.format(',\n  '.join(["'{0}'".format(x) for x in ['N/A'] + names]))
+      code += '\n]'
     return code + '\n\n'
 #+end_src
 *** delegates
@@ -50,7 +57,7 @@
   <<action-delegate>>
   <<guard-delegate>>
   <<variable-delegate>>
-  def _save_delegates(variables: List[Variable], states: List[State]) -> str:
+  def _save_delegates(variables: List[Variable], states: List[State], debug = False) -> str:
     code = ''
     code += _save_action_delegate(states) + '\n'
     code += _save_guard_delegate(states) + '\n'
@@ -62,8 +69,8 @@
   def _save_action_delegate(states: List[State]) -> str:
     actions = {}
     for state in states:
-      for transaction in state.transactions:
-        for action in transaction.actions:
+      for transition in state.transitions:
+        for action in transition.actions:
           if isinstance(action, Call):
             actions[str(action.operator)] = action
           elif isinstance(action, Assignment):
@@ -87,8 +94,8 @@
   def _save_guard_delegate(states: List[State]) -> str:
     calls = {}
     for state in states:
-      for transaction in state.transactions:
-        guard = transaction.guard
+      for transition in state.transitions:
+        guard = transition.guard
         if guard:
           for call in find_call_in_expression(guard.expr):
             calls[str(call)] = call
@@ -120,105 +127,131 @@
 #+end_src
 *** state machine
 #+begin_src python :noweb-ref save-state-machine
-  def _save_state_machine(states: List[State]) -> str:
+  def _save_state_machine(states: List[State], debug: bool) -> str:
     events = {}
     extended_events = {}
     eventimpl = ''
     for state in states:
-      for transaction in state.transactions:
-        event = transaction.event
+      for transition in state.transitions:
+        event = transition.event
         if event not in events:
-          events[event] = [transaction]
+          events[event] = [transition]
         else:
-          events[event].append(transaction)
-    for (event, transactions) in events.items():
+          events[event].append(transition)
+
+    evtidx = 0
+    for (event, transitions) in events.items():
       guardmappings = {}
-      for transaction in transactions:
-        if transaction.guard:
-          guardmappings[str(transaction.guard)] = transaction
+      for transition in transitions:
+        if transition.guard:
+          guardmappings[str(transition.guard)] = transition
         else:
-          guardmappings[''] = transaction
-      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (_python_normalize(event.name), ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
+          guardmappings[''] = transition
       guards = [x for x in guardmappings.keys()]
+      eventimpl += ' ' * 2 + 'def %s(self, %s):\n' % (_python_normalize(event.name), ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
       if len(guards) == 1 and guards[0] == '':
         event_tag = normalize(event.name)
-        eventimpl += ' ' * 4 + 'if self.state == _transactions_target[self.state][self.%s]:\n' % event_tag
-        eventimpl += ' ' * 6 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-        eventimpl += ' ' * 8 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
-        eventimpl += ' ' * 4 + 'else:\n'
-        eventimpl += ' ' * 6 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-        eventimpl += ' ' * 8 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
-        eventimpl += ' ' * 6 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
-        extended_events[event_tag] = None
+        extended_events[event_tag] = (event, evtidx)
+        evtidx += 1
+        if debug:
+          eventimpl += ' ' * 4 + 'prevstate = self.state\n'
+        eventimpl += ' ' * 4 + 'delta = _transition_states[self.state][self.%s]\n' % event_tag
+        eventimpl += ' ' * 4 + 'self._transition_actions[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
+        eventimpl += ' ' * 4 + 'self.state += delta\n'
+        if debug:
+          eventimpl += ' ' * 4 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[prevstate], "%s", _state_strings[self.state], _action_strings[self.state][%d]))\n' % (str(event), extended_events[event_tag][1])
       else:
         firstline = True
         for guardstr in guards:
           if guardstr == '':
             continue
-          transaction = guardmappings[guardstr]
-          guard = transaction.guard
+          transition = guardmappings[guardstr]
+          guard = transition.guard
+          event_tag = normalize(event.name) + '_' + normalize(str(guard))
+          extended_events[event_tag] = (event, evtidx)
+          evtidx += 1
           if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
             eventimpl += ' ' * 4 + ('el' if not firstline else '') + 'if self.guard_delegate.%s:\n' % str(guard)
           else:
             eventimpl += ' ' * 4 + ('el' if not firstline else '') + 'if %s:\n' % str(guard)
-          event_tag = normalize(event.name) + '_' + normalize(str(guard))
-          eventimpl += ' ' * 6 + 'if self.state == _transactions_target[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 8 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 10 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
-          eventimpl += ' ' * 6 + 'else:\n'
-          eventimpl += ' ' * 8 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 10 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
-          eventimpl += ' ' * 8 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
-          extended_events[event_tag] = None
+          if debug:
+            eventimpl += ' ' * 6 + 'prevstate = self.state\n'
+          eventimpl += ' ' * 6 + 'delta = _transition_states[self.state][self.%s]\n' % event_tag
+          eventimpl += ' ' * 6 + 'self._transition_actions[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
+          eventimpl += ' ' * 6 + 'self.state += delta\n'
+          if debug:
+            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[prevstate], "%s[%s]", _state_strings[self.state], _action_strings[self.state][%d]))\n' % (str(event), guardstr.replace('"', '\\"'), extended_events[event_tag][1])
           firstline = False
         if '' in guards:
-          eventimpl += ' ' * 4 + 'else:\n'
           event_tag = normalize(event.name)
-          eventimpl += ' ' * 6 + 'if self.state == _transactions_target[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 8 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 10 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
-          eventimpl += ' ' * 6 + 'else:\n'
-          eventimpl += ' ' * 8 + 'if self._transactions_action[self.state][self.%s]:\n' % event_tag
-          eventimpl += ' ' * 10 + 'self._transactions_action[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
-          eventimpl += ' ' * 8 + 'self.state = _transactions_target[self.state][self.%s]\n' % event_tag
-          extended_events[event_tag] = None
+          extended_events[event_tag] = (event, evtidx)
+          evtidx += 1
+          eventimpl += ' ' * 4 + 'else:\n'
+          eventimpl += ' ' * 6 + 'prevstate = self.state\n'
+          eventimpl += ' ' * 6 + 'delta = _transition_states[self.state][self.%s]\n' % event_tag
+          eventimpl += ' ' * 6 + 'self._transition_actions[self.state][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
+          eventimpl += ' ' * 6 + 'self.state += delta\n'
+          if debug:
+            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[prevstate], "%s", _state_strings[self.state], _action_strings[self.state][%d]))\n' % (str(event), extended_events[event_tag][1])
       eventimpl += '\n'
+
     eventdef = ''
     eventidx = 0
     for tag in extended_events.keys():
       eventdef += '%s%s = %d\n' % (' ' * 2, tag, eventidx)
       eventidx += 1
-    targetstable = []
-    actionstable = []
+    statestable = ['[%s]' % ', '.join(['0'] * len(extended_events))]
+    actionstable = ['[%s]' % ', '.join(['self._noop'] * len(extended_events))]
     actionblocks = {}
     actionblockid = 0
+    if debug:
+      stringstable = ['[%s]' % ', '.join(["'N/A'"] * len(extended_events))]
+    noopblocks = {}
+    noopid = 0
     for state in states:
       targets = []
       actions = []
+      if debug:
+        strings = []
+        for i in range(len(extended_events)):
+          strings.append('')
       for tag in extended_events.keys():
         found_target = False
         found_action = False
-        for transaction in state.transactions:
-          if transaction.guard:
-            event_tag = normalize(str(transaction.event.name)) + '_' + normalize(str(transaction.guard))
+        if debug:
+          (_, evtidx) = extended_events[tag]
+        for transition in state.transitions:
+          if transition.guard:
+            event_tag = normalize(str(transition.event.name)) + '_' + normalize(str(transition.guard))
           else:
-            event_tag = normalize(str(transaction.event.name))
+            event_tag = normalize(str(transition.event.name))
           if tag == event_tag:
-            if transaction.target:
-              target = transaction.target
+            if transition.target:
+              target = states.index(transition.target) - states.index(state)
               found_target = True
-            if len(transaction.actions) == 0:
-              action = 'None'
-              found_action = True
-            elif len(transaction.actions) == 1:
-              if isinstance(transaction.actions[0], Call):
-                args = ''.join([str(x) for x in transaction.actions[0].operands])
-                params = ''.join([str(x.name) for x in transaction.event.parameters])
+            if len(transition.actions) == 0:
+              if debug:
+                actionstring = 'N/A'
+              paramdecls = ', '.join(['%s' % str(x.name) for x in transition.event.parameters])
+              if paramdecls not in noopblocks:
+                action = 'self._noop_%d' % noopid
+                noopblocks[paramdecls] = action
+                noopid += 1
+                found_action = True
+              else:
+                action = noopblocks[paramdecls]
+                found_action = True
+            elif len(transition.actions) == 1:
+              if debug:
+                actionstring = ';'.join([str(x) for x in transition.actions])
+              if isinstance(transition.actions[0], Call):
+                args = ''.join([str(x) for x in transition.actions[0].operands])
+                params = ''.join([str(x.name) for x in transition.event.parameters])
                 if args == params:
-                  action = 'self.action_delegate.%s' % _python_normalize(str(transaction.actions[0].operator))
+                  action = 'self.action_delegate.%s' % _python_normalize(str(transition.actions[0].operator))
                   found_action = True
                 else:
-                  actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transaction.event.parameters]) + '\n' + str(transaction.actions[0])
+                  actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transition.event.parameters]) + '\n' + str(transition.actions[0])
                   if actionblock not in actionblocks:
                     action = 'self._action_block_%d' % actionblockid
                     actionblocks[actionblock] = (action, False)
@@ -227,8 +260,8 @@
                   else:
                     (action, _) = actionblocks[actionblock]
                     found_action = True
-              elif isinstance(transaction.actions[0], Assignment):
-                actionblock = str(transaction.actions[0])
+              elif isinstance(transition.actions[0], Assignment):
+                actionblock = str(transition.actions[0])
                 if actionblock not in actionblocks:
                   action = 'self._action_block_%d' % actionblockid
                   actionblocks[actionblock] = (action, False)
@@ -238,10 +271,19 @@
                   (action, _) = actionblocks[actionblock]
                   found_action = True
               else:
-                action = 'None'
-                found_action = True
+                paramdecls = ', '.join(['%s' % str(x.name) for x in transition.event.parameters])
+                if paramdecls not in noopblocks:
+                  action = 'self._noop_%d' % noopid
+                  noopblocks[paramdecls] = action
+                  noopid += 1
+                  found_action = True
+                else:
+                  action = noopblocks[paramdecls]
+                  found_action = True
             else:
-              actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
+              if debug:
+                actionstring = '; '.join([str(x) for x in transition.actions])
+              actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
               if actionblock not in actionblocks:
                 action = 'self._action_block_%d' % actionblockid
                 actionblocks[actionblock] = (action, False)
@@ -250,53 +292,74 @@
                 (action, _) = actionblocks[actionblock]
               found_action = True
         if not found_target:
-          target = state
+          target = 0
         if not found_action:
-          action = 'None'
+          if debug:
+            actionstring = 'N/A'
+          paramdecls = ', '.join(['%s' % x.name for x in extended_events[tag][0].parameters])
+          if paramdecls not in noopblocks:
+            action = 'self._noop_%d' % noopid
+            noopblocks[paramdecls] = action
+            noopid += 1
+          else:
+            action = noopblocks[paramdecls]
         targets.append(target)
         actions.append(action)
-      targetstable.append('[%s]' % ', '.join(['State.' + normalize(x.name) for x in targets]))
+        if debug:
+          strings[evtidx] = (actionstring)
+      statestable.append('[%s]' % ', '.join(['%d' % x for x in targets]))
       actionstable.append('[%s]' % ', '.join(actions))
-    actionimpl = ''
+      if debug:
+        stringstable.append('[%s]' % ', '.join(["'{0}'".format(x.replace("'", "\\'")) for x in strings]))
+    actionimpl = ' ' * 2 + 'def _noop(self, ctx):\n'
+    actionimpl += ' ' * 4 + 'pass\n\n'
+    for paramdecls in noopblocks.keys():
+      action = noopblocks[paramdecls]
+      actionimpl += ' ' * 2 + 'def {0}(self, {1}):\n'.format(action.replace('self.', ''), ', '.join(['ctx', paramdecls]))
+      actionimpl += ' ' * 4 + 'pass\n\n'
     for state in states:
-      for transaction in state.transactions:
-        if len(transaction.actions) == 0:
+      for transition in state.transitions:
+        if len(transition.actions) == 0:
           continue
-        elif len(transaction.actions) == 1:
-          if isinstance(transaction.actions[0], Call):
-            args = ''.join([str(x) for x in transaction.actions[0].operands])
-            params = ''.join([str(x.name) for x in transaction.event.parameters])
+        elif len(transition.actions) == 1:
+          if isinstance(transition.actions[0], Call):
+            args = ''.join([str(x) for x in transition.actions[0].operands])
+            params = ''.join([str(x.name) for x in transition.event.parameters])
             if args == params:
               continue
-            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
-          elif isinstance(transaction.actions[0], Assignment):
-            actionblock = str(transaction.actions[0])
+            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+          elif isinstance(transition.actions[0], Assignment):
+            actionblock = str(transition.actions[0])
           else:
             continue
         else:
-          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transaction.event.parameters]) + '\n' + '\n'.join([str(x) for x in transaction.actions])
+          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
         (action, generated) = actionblocks[actionblock]
         if generated:
           continue
         actionfun = action.replace('self.', '')
         actionblocks[actionblock] = (action, True)
-        actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [str(x.name).lower() for x in transaction.event.parameters]))
-        for action in transaction.actions:
+        actionimpl += ' ' * 2 + 'def %s(self, %s):\n' % (actionfun, ', '.join(['ctx'] + [str(x.name).lower() for x in transition.event.parameters]))
+        for action in transition.actions:
           if isinstance(action, Call):
-            actionimpl += ' ' * 6 + 'self.action_delegate.%s(%s)\n' % (_python_normalize(str(action.operator)), ', '.join(['ctx'] + [str(x) for x in action.operands]))
+            actionimpl += ' ' * 4 + 'self.action_delegate.%s(%s)\n' % (_python_normalize(str(action.operator)), ', '.join(['ctx'] + [str(x) for x in action.operands]))
           elif isinstance(action, Assignment):
             if isinstance(action.expression, Identifier):
-              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
-              actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
+              actionimpl += ' ' * 4 + '%s = self.action_delegate.%s(state, ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
+              actionimpl += ' ' * 4 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
             elif isinstance(action.expression, Call):
               call = action.expression
-              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(%s)\n' % (str(action.target), _python_normalize(str(call.operator)), ', '.join(['ctx'] + [str(x) for x in call.operands]))
-              actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
+              actionimpl += ' ' * 4 + '%s = self.action_delegate.%s(%s)\n' % (str(action.target), _python_normalize(str(call.operator)), ', '.join(['ctx'] + [str(x) for x in call.operands]))
+              actionimpl += ' ' * 4 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
             else:
-              actionimpl += ' ' * 6 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
-              actionimpl += ' ' * 6 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
+              actionimpl += ' ' * 4 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
+              actionimpl += ' ' * 4 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
         actionimpl += '\n'
-    code = '_transactions_target = [%s]\n\n\n' % (', '.join(targetstable))
+    code = '_transition_states = [%s]\n\n\n' % (', '.join(statestable))
+    if debug:
+      code += '_action_strings = [\n'
+      code += '  %s' % ',\n  '.join(stringstable)
+      code += '\n]\n\n\n'
     code += 'class StateMachine:\n'
     code += eventdef + '\n'
     code += ' ' * 2 + 'def __init__(self, action_delegate = None, guard_delegate = None, variable_delegate = None):\n'
@@ -304,17 +367,17 @@
     code += ' ' * 4 + 'self.action_delegate = action_delegate\n'
     code += ' ' * 4 + 'self.guard_delegate = guard_delegate\n'
     code += ' ' * 4 + 'self.variable_delegate = variable_delegate\n'
-    code += ' ' * 4 + 'self._transactions_action = [%s]\n' % ', '.join(actionstable)
+    code += ' ' * 4 + 'self._transition_actions = [%s]\n' % ', '.join(actionstable)
     code += '\n'
     return code + eventimpl + actionimpl
 #+end_src
 
-| variable        | type                              | note                  |
-|-----------------+-----------------------------------+-----------------------|
-| events          | Mapping[Event, List[Transaction]] |                       |
-| extended_events | Mapping[str, Transaction]         | key is event + guards |
-| guardmappings   | Mapping[str, Transaction]         | key is guard          |
-| actionblocks    | Mapping[str, Tuple[str, bool]]    | key is actionblock    |
+| variable        | type                             | note                  |
+|-----------------+----------------------------------+-----------------------|
+| events          | Mapping[Event, List[Transition]] |                       |
+| extended_events | Mapping[str, Transition]         | key is event + guards |
+| guardmappings   | Mapping[str, Transition]         | key is guard          |
+| actionblocks    | Mapping[str, Tuple[str, bool]]   | key is actionblock    |
 *** utility
 #+begin_src python :noweb-ref utility
   def _python_normalize(string: str) -> str:

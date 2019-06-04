@@ -144,7 +144,7 @@
   class _LexerActionDelegate(LexerActionDelegate):
 
     def error(self, ctx):
-      print('Unknow error')
+      print('Unknown error')
 
     def quit(self, ctx):
       exit(1)
