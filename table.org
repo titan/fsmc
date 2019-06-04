@@ -7,7 +7,7 @@
   from semantic import Assignment, Call, Expression, Identifier
   from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
   from lexer import Lexer
-  from table_fsm import Delegate as TableDelegate, StateMachine
+  from table_fsm import ActionDelegate as TableDelegate, StateMachine
   import re
 
   <<importer>>
@@ -40,7 +40,7 @@
 
   def _reader(src):
       ctx = _TableContext()
-      fsm = StateMachine(_MyTableDelegate())
+      fsm = StateMachine(action_delegate = _MyTableDelegate())
       for ch in src:
           ctx.ch = ch
           if ch == '\n':

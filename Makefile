@@ -18,7 +18,7 @@ $(TARGET): %.py: %.org
 	sed 's/$$$\{BUILDDIR}/$(ESCAPED_BUILDDIR)/g' $< | org-tangle -
 
 $(TABLEFSM): %.py: %.txt
-	naive-fsm-generator.py --lang python $(addprefix $(BUILDDIR)/, $(notdir $<)) -d $(BUILDDIR)
+	fsmc.py $(addprefix $(BUILDDIR)/, $(notdir $<)) -t python
 
 $(subst .py,.txt,$(TABLEFSM)): table.org
 	sed 's/$$$\{BUILDDIR}/$(ESCAPED_BUILDDIR)/g' $< | org-tangle -
