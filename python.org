@@ -64,7 +64,7 @@
     code += _save_variable_delegate(variables) + '\n'
     return code
 #+end_src
-**** aciton delegate
+**** action delegate
 #+begin_src python :noweb-ref action-delegate
   def _save_action_delegate(states: List[State]) -> str:
     actions = {}

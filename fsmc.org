@@ -20,6 +20,7 @@
   import python
   import excel
   import table
+  import pony
 
   importers = {
     'json': jsonio.load,
@@ -39,6 +40,7 @@
     'xlsx': excel.save,
     'table': table.save,
     'txt': table.save,
+    'pony': pony.save,
   }
 
   def main(args):

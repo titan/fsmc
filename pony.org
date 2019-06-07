@@ -1,0 +1,497 @@
+#+STARTUP: indent
+* Pony
+** framework
+#+begin_src python :tangle ${BUILDDIR}/pony.py
+  from typing import List, Mapping, Tuple
+  from model import Event, Parameter, State, Transition, Variable
+  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
+  from analyzer import find_call_in_expression
+  from utility import normalize
+
+  <<exporter>>
+
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<utility>>
+
+  <<save-states>>
+
+  <<save-delegates>>
+
+  <<save-state-machine>>
+
+  def save(dst: str, variables: List[Variable], states: List[State], debug: bool):
+    import os.path
+    (path, filename) = os.path.split(dst)
+    (name, ext) = os.path.splitext(filename)
+    module = name.replace(' ', '-')
+    dst = os.path.join(path, module + ext)
+    with open(dst, 'w') as f:
+      code1 = _save_states(states)
+      (code2_1, code2_2, code2_3) = _save_delegates(variables, states)
+      code2 = code2_1 + code2_2 + code2_3
+      #(open2, code2_1, code2_2, code2_3) = _save_delegates(variables, states)
+      code3 = _save_state_machine(states, code2_1 != '', code2_2 != '', code2_3 != '')
+      #open2.append(module + 'ActionDelegate')
+      #open2.append(module + 'GuardDelegate')
+      #open2.append(module + 'VariableDelegate')
+      #f.write('\n'.join(['open %s;' % x for x in open2]) + '\n\n')
+      #f.write(code1 + code2_1 + code2_2 + code2_3 + code3)
+      f.write(code1 + code2 + code3)
+#+end_src
+*** states
+#+begin_src python :noweb-ref save-states
+  def _save_states(states: List[State]) -> str:
+    code = ''
+    for (idx, state) in enumerate(states):
+      code += 'primitive {0} fun apply(): I32 => {1}\n'.format(_to_capitalize(_pony_normalize(state.name)), idx + 1)
+    code += '\n'
+    code += 'type State is ({0})\n'.format(' | '.join([_to_capitalize(_pony_normalize(x.name)) for x in states]))
+    code += '\n'
+    return code
+#+end_src
+*** delegates
+#+begin_src python :noweb-ref save-delegates
+  <<action-delegate>>
+  <<guard-delegate>>
+  <<variable-delegate>>
+  def _save_delegates(variables: List[Variable], states: List[State]) -> str:
+    code1 = _save_action_delegate(variables, states)
+    code2 = _save_guard_delegate(states)
+    code3 = _save_variable_delegate(variables)
+    return (code1, code2, code3)
+#+end_src
+**** action delegate
+#+begin_src python :noweb-ref action-delegate
+  def _save_action_delegate(varaibles: List[Variable], states: List[State]) -> str:
+    actions = {}
+    for state in states:
+      for transition in state.transitions:
+        for action in transition.actions:
+          if isinstance(action, Call):
+            actions[str(action.operator)] = (transition.event, action)
+          elif isinstance(action, Assignment):
+            for call in find_call_in_expression(action.expression):
+              actions[str(call.operator)] = (transition.event, call)
+    code = ''
+    for (event, action) in actions.values():
+      if len(str(action.operator)) == 0:
+        continue
+      types = []
+      returntype = ''
+      for operand in action.operands:
+        if isinstance(operand, Identifier):
+          for param in event.parameters:
+            if str(param.name) == str(operand):
+              types.append(str(param.type).capitalize())
+              break
+        elif isinstance(operand, Literal):
+          if operand.type == 'char':
+            types.append('U8')
+          elif operand.type == 'string':
+            types.append('String')
+          elif operand.type == 'number':
+            types.append('Number')
+      if action.type != None:
+        returntype = _pony_normalize(str(action.type)).capitalize()
+      if returntype == '':
+        returntype = 'T'
+      else:
+        returntype = '(T, %s)' % returntype
+      code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(action.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype)
+    if code != '':
+      code = 'trait ActionDelegate[T: Any val]\n' + code + '\n'
+    return code
+#+end_src
+**** guard delegate
+#+begin_src python :noweb-ref guard-delegate
+  def _save_guard_delegate(states: List[State]) -> Tuple[List[str], str]:
+    calls = {}
+    for state in states:
+      for transition in state.transitions:
+        guard = transition.guard
+        if guard:
+          for call in find_call_in_expression(guard.expr):
+            calls[str(call)] = (transition.event, call)
+    code = ''
+    for (event, call) in calls.values():
+      types = []
+      for operand in call.operands:
+        if isinstance(operand, Identifier):
+          for param in event.parameters:
+            if str(param.name) == str(operand):
+              types.append(str(param.type).capitalize())
+              break
+        elif isinstance(operand, Literal):
+          if operand.type == 'char':
+            types.append('U8')
+          elif operand.type == 'string':
+            types.append('String')
+          elif operand.type == 'number':
+            types.append('Number')
+      code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(call.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), 'Bool')
+    if code != '':
+      code = 'trait GuardDelegate[T: Any val]\n' + code + '\n'
+    return code
+#+end_src
+**** variable delegate
+#+begin_src python :noweb-ref variable-delegate
+  def _save_variable_delegate(variables: List[Variable]) -> Tuple[List[str], str]:
+    types = {}
+    code = ''
+    for variable in variables:
+      if variable.type in _pony_builtin_types:
+        type = variable.type
+      else:
+        type = variable.type.capitalize()
+        types[type] = 0
+      code += ' ' * 4 + 'fun on_{0}_changed(ctx: T, v: {1}): None\n'.format(_pony_normalize(variable.name), type)
+    if code != '':
+      code = 'trait VariableDelegate[T: Any val]\n' + code + '\n'
+    return code
+#+end_src
+*** state machine
+#+begin_src python :noweb-ref save-state-machine
+  def _get_event_data(states: List[State]) -> Tuple[Mapping[Event, List[Transition]], List[str]]:
+    events = {}
+    extended_events = {}
+    for state in states:
+      for transition in state.transitions:
+        event = transition.event
+        if event not in events:
+          events[event] = [transition]
+        else:
+          events[event].append(transition)
+    for (event, transitions) in events.items():
+      guardmappings = {}
+      for transition in transitions:
+        if transition.guard:
+          guardmappings[str(transition.guard)] = transition
+        else:
+          guardmappings[''] = transition
+      guards = [x for x in guardmappings.keys()]
+      if len(guards) == 1 and guards[0] == '':
+        event_tag = normalize(event.name)
+        extended_events[event_tag] = None
+      else:
+        for guardstr in guards:
+          if guardstr == '':
+            continue
+          transition = guardmappings[guardstr]
+          guard = transition.guard
+          event_tag = normalize(event.name) + '_' + normalize(str(guard))
+          extended_events[event_tag] = None
+        if '' in guards:
+          event_tag = normalize(event.name)
+          extended_events[event_tag] = None
+    return (events, [x for x in extended_events.keys()])
+
+  def _get_target_and_action_data(states: List[State], extended_eventtags: List[str]) -> Tuple[List[List[str]], List[List[str]], Mapping[str, Tuple[str, bool]]]:
+    targetstable = [[0] * len(extended_eventtags)]
+    actionstable = [['_Noop'] * len(extended_eventtags)]
+    actionblocks = {}
+    actionblockid = 0
+    for state in states:
+      targets = []
+      actions = []
+      for tag in extended_eventtags:
+        found_target = False
+        found_action = False
+        for transition in state.transitions:
+          if transition.guard:
+            event_tag = normalize(str(transition.event.name)) + '_' + normalize(str(transition.guard))
+          else:
+            event_tag = normalize(str(transition.event.name))
+          if tag == event_tag:
+            if transition.target:
+              target = states.index(transition.target) - states.index(state)
+              found_target = True
+            if len(transition.actions) == 0:
+              action = '_Noop'
+              found_action = True
+            elif len(transition.actions) == 1:
+              if isinstance(transition.actions[0], Call):
+                args = ''.join([str(x) for x in transition.actions[0].operands])
+                actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transition.event.parameters]) + '\n' + str(transition.actions[0])
+                if actionblock not in actionblocks:
+                  action = '_ActionBlock%d' % actionblockid
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
+              elif isinstance(transition.actions[0], Assignment):
+                actionblock = str(transition.actions[0])
+                if actionblock not in actionblocks:
+                  action = '_ActionBlock%d' % actionblockid
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
+              else:
+                action = '_Noop'
+                found_action = True
+            else:
+              actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+              if actionblock not in actionblocks:
+                action = '_ActionBlock%d' % actionblockid
+                actionblocks[actionblock] = (action, False)
+                actionblockid += 1
+              else:
+                (action, _) = actionblocks[actionblock]
+              found_action = True
+        if not found_target:
+          target = 0
+        if not found_action:
+          action = '_Noop'
+        targets.append(target)
+        actions.append(action)
+      targetstable.append(targets)
+      actionstable.append(actions)
+    return (targetstable, actionstable, actionblocks)
+
+  def _save_state_machine(states: List[State], need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool) -> str:
+    (events, extended_eventtags) = _get_event_data(states)
+    (targetstable, actionstable, actionblocks) = _get_target_and_action_data(states, extended_eventtags)
+
+    action_parameter_signatures = _action_parameter_signatures(events)
+    optional_action_parameter_signatures = _optional_action_parameter_signatures(events)
+
+    delegates_in_event = []
+    if need_action_delegate:
+      delegates_in_event.append('action_delegate')
+    if need_variable_delegate:
+      delegates_in_event.append('variable_delegate')
+
+    eventimpl = ''
+    for (event, transitions) in events.items():
+      guardmappings = {}
+      for transition in transitions:
+        if transition.guard:
+          guardmappings[str(transition.guard)] = transition
+        else:
+          guardmappings[''] = transition
+      parameter_signatures = [_parameter_to_pony_signature(x) for x in event.parameters]
+      eventimpl += ' ' * 4 + 'fun ref %s(%s): T =>\n' % (_pony_normalize(event.name), ', '.join(["ctx: T"] + parameter_signatures))
+      guards = [x for x in guardmappings.keys()]
+      if len(guards) == 1 and guards[0] == '':
+        args = []
+        for p in action_parameter_signatures:
+          if p in parameter_signatures:
+            args.append(p.split(':')[0])
+          else:
+            args.append('None')
+        event_tag = normalize(event.name)
+        eventimpl += ' ' * 8 + 'let idx = USize.from[I32]((state * {0}) + {1})\n'.format(len(states), extended_eventtags.index(event_tag))
+        eventimpl += ' ' * 8 + 'state = state + try _transition_states(idx)? else 0 end\n'
+        eventimpl += ' ' * 8 + 'try\n'
+        eventimpl += ' ' * 12 + '_transition_actions(idx)?({0})\n'.format(', '.join(delegates_in_event + ['ctx'] + args))
+        eventimpl += ' ' * 8 + 'else\n'
+        eventimpl += ' ' * 12 + 'ctx\n'
+        eventimpl += ' ' * 8 + 'end\n'
+      else:
+        firstline = True
+        args = []
+        for p in action_parameter_signatures:
+          if p in parameter_signatures:
+            args.append(p.split(':')[0])
+          else:
+            args.append('None')
+        for guardstr in guards:
+          if guardstr == '':
+            continue
+          transition = guardmappings[guardstr]
+          guard = transition.guard
+          if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+            eventimpl += ' ' * 8 + ('else' if not firstline else '') + 'if guard_delegate.{0} then\n'.format(str(guard))
+          else:
+            eventimpl += ' ' * 8 + ('else' if not firstline else '') + 'if {0} then\n'.format(str(guard))
+          event_tag = normalize(event.name) + '_' + normalize(str(guard))
+          eventimpl += ' ' * 12 + 'let idx = USize.from[I32]((state * {0}) + {1})\n'.format(len(states), extended_eventtags.index(event_tag))
+          eventimpl += ' ' * 12 + 'state = state + try _transition_states(idx)? else 0 end\n'
+          eventimpl += ' ' * 12 + 'try\n'
+          eventimpl += ' ' * 16 + '_transition_actions(idx)?({0})\n'.format(', '.join(delegates_in_event + ['ctx'] + args))
+          eventimpl += ' ' * 12 + 'else\n'
+          eventimpl += ' ' * 16 + 'ctx\n'
+          eventimpl += ' ' * 12 + 'end\n'
+          firstline = False
+        if '' in guards:
+          eventimpl += ' ' * 8 + 'else\n'
+          event_tag = normalize(event.name)
+          eventimpl += ' ' * 12 + 'let idx = USize.from[I32]((state * {0}) + {1})\n'.format(len(states), extended_eventtags.index(event_tag))
+          eventimpl += ' ' * 12 + 'state = state + try _transition_states(idx)? else 0 end\n'
+          eventimpl += ' ' * 12 + 'try\n'
+          eventimpl += ' ' * 16 + '_transition_actions(idx)?({0})\n'.format(', '.join(delegates_in_event + ['ctx'] + args))
+          eventimpl += ' ' * 12 + 'else\n'
+          eventimpl += ' ' * 16 + 'ctx\n'
+          eventimpl += ' ' * 12 + 'end\n'
+        eventimpl += ' ' * 8 + 'end\n'
+      eventimpl += '\n'
+
+    delegates_in_action = []
+    if need_action_delegate:
+      delegates_in_action.append('action_delegate: ActionDelegate[T]')
+    if need_variable_delegate:
+      delegates_in_action.append('variable_delegate: VariableDelegate[T]')
+    actionimpl = 'interface _Action[T: Any val]\n'
+    actionimpl += ' ' * 4 + 'fun apply({0}): T\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+    actionimpl += 'primitive _Noop[T: Any val]\n'
+    actionimpl += ' ' * 4 + 'fun apply({0}): T => ctx0\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+    for state in states:
+      for transition in state.transitions:
+        if len(transition.actions) == 0:
+          continue
+        elif len(transition.actions) == 1:
+          if isinstance(transition.actions[0], Call):
+            args = ''.join([str(x) for x in transition.actions[0].operands])
+            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+          elif isinstance(transition.actions[0], Assignment):
+            actionblock = str(transition.actions[0])
+          else:
+            continue
+        else:
+          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+        (action, generated) = actionblocks[actionblock]
+        if generated:
+          continue
+        actionfun = action
+        actionblocks[actionblock] = (action, True)
+        actionimpl += 'primitive {0}[T: Any val]\n'.format(actionfun)
+        actionimpl += ' ' * 4 + 'fun apply({0}): T =>\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+        used_params = _get_used_parameters(transition)
+        actionimpl += _generate_recursive_match(8, used_params, transition)
+        actionimpl += '\n'
+
+    code = 'class StateMachine[T: Any val]\n'
+    code += ' ' * 4 + 'var state: I32\n'
+    delegates = []
+    if need_action_delegate:
+      code += ' ' * 4 + 'var action_delegate: ActionDelegate[T]\n'
+      delegates.append('actiondelegate: ActionDelegate[T]')
+    if need_guard_delegate:
+      code += ' ' * 4 + 'var guard_delegate: GuardDelegate[T]\n'
+      delegates.append('guarddelegate: GuardDelegate[T]')
+    if need_variable_delegate:
+      code += ' ' * 4 + 'var variable_delegate: VariableDelegate[T]\n'
+      delegates.append('variabledelegate: VariableDelegate[T]')
+    code += ' ' * 4 + 'let _transition_states: Array[I32] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([str(y) for y in x]) for x in targetstable]))
+    code += ' ' * 4 + 'let _transition_actions: Array[_Action[T] val] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y + '[T]' for y in x]) for x in actionstable]))
+    code += '\n'
+    code += ' ' * 4 + 'new create({0}) =>\n'.format(', '.join(delegates))
+    code += ' ' * 8 + 'state = {0}()\n'.format(_to_capitalize(normalize(states[0].name)))
+    if need_action_delegate:
+      code += ' ' * 8 + 'action_delegate = actiondelegate\n'
+    if need_guard_delegate:
+      code += ' ' * 8 + 'guard_delegate = guarddelegate\n'
+    if need_variable_delegate:
+      code += ' ' * 8 + 'variable_delegate = variabledelegate\n'
+    code += '\n'
+    return actionimpl + code + eventimpl
+#+end_src
+
+| variable        | type                             | note                  |
+|-----------------+----------------------------------+-----------------------|
+| events          | Mapping[Event, List[Transition]] |                       |
+| extended_events | Mapping[str, Transition]         | key is event + guards |
+| guardmappings   | Mapping[str, Transition]         | key is guard          |
+| actionblocks    | Mapping[str, Tuple[str, bool]]   | key is actionblock    |
+*** utility
+#+begin_src python :noweb-ref utility
+  _pony_builtin_types = ['Int', 'Float', 'Number', 'String', 'Bool', 'Array', 'List']
+
+  def _pony_normalize(string: str) -> str:
+    keywords = ["box", "iso", "ref", "tag", "trn", "val", "actor", "addressof", "as", "be", "break", "class", "compiler_intrinsic", "consume", "continue", "do", "else", "elseif", "embed", "end", "error", "for", "fun", "if", "ifdef", "in", "interface", "is", "isnt", "lambda", "let", "match", "new", "not", "object", "primitive", "recover", "repeat", "return", "struct", "then", "this", "trait", "try", "type", "until", "use", "var", "where", "while", "with", "actor", "be", "class", "else", "for", "fun", "if", "ifdef", "interface", "match", "new", "primitive", "recover", "ref", "repeat", "struct", "tag", "then", "trait", "try", "until", "while", "with", "false", "true", "None"]
+    result = normalize(string.replace('-', ' ').replace('_', ' ')).lower()
+    if result in keywords:
+      return 'my_' + result
+    else:
+      return result
+
+  def _parameter_to_pony_signature(p: Parameter) -> str:
+    if p.type in _pony_builtin_types:
+      return '%s: %s' % (p.name, p.type)
+    else:
+      return '%s: %s' % (p.name, str(p.type).capitalize())
+
+  def _action_parameter_signatures(events: List[Event]) -> List[str]:
+    parameters = {}
+    for evt in events:
+      for param in evt.parameters:
+        parameters[_parameter_to_pony_signature(param)] = param
+    return [_parameter_to_pony_signature(x) for x in parameters.values()]
+
+  def _optional_action_parameter_signatures(events: List[Event]) -> List[str]:
+    parameters = {}
+    for evt in events:
+      for param in evt.parameters:
+        parameters[_parameter_to_pony_signature(param)] = param
+    return ['{0}: ({1} | None)'.format(x.split(':')[0], x.split(':')[1].strip()) for x in [_parameter_to_pony_signature(x) for x in parameters.values()]]
+
+  def _get_used_parameters(transition: Transition) -> List[Parameter]:
+    params = {}
+    for action in transition.actions:
+      if isinstance(action, Call):
+        for arg in action.operands:
+          if isinstance(arg, Identifier):
+            for param in transition.event.parameters:
+              if str(arg) == str(param.name):
+                params[str(arg)] = param
+      elif isinstance(action, Assignment):
+        if isinstance(action.expression, Call):
+          for arg in action.expression.operands:
+            if isinstance(arg, Identifier):
+              for param in transition.event.parameters:
+                if str(arg) == str(param.name):
+                  params[str(arg)] = param
+    return [x for x in params.values()]
+
+  def _generate_action_body(indent: int, transition: Transition) -> str:
+    code = ''
+    idx = 0
+    varidx = 0
+    for action in transition.actions:
+      if isinstance(action, Call):
+        code += ' ' * indent + 'let ctx{0} = action_delegate.{1}({2})\n'.format(idx + 1, _pony_normalize(str(action.operator)), ', '.join(['ctx%d' % idx] + [str(x) for x in action.operands]))
+      elif isinstance(action, Assignment):
+        if isinstance(action.expression, Identifier):
+          code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}(ctx{3})\n'.format(idx + 1, varidx, _pony_normalize(str(action.expression)), idx)
+          code += ' ' * indent + 'variable_delegate.on_%s_changed(var%d)\n' % (str(action.target).lower(), varidx)
+          varidx += 1
+        elif isinstance(action.expression, Call):
+          call = action.expression
+          code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}({3})\n'.format(idx + 1, varidx, _pony_normalize(str(call.operator)), ', '.join(['ctx%d' % idx] + [str(x) for x in call.operands]))
+          code += ' ' * indent + 'variable_delegate.on_%s_changed(var%d)\n' % (str(action.target).lower(), varidx)
+          varidx += 1
+        else:
+          code += ' ' * indent + '(let ctx{0}, let {1}) = action_delegate.{2}(ctx{3});\n'.format(idx + 1, str(action.target), _pony_normalize(str(action.expression)), idx)
+          code += ' ' * indent + 'variable_delegate.on_%s_changed(%d)\n' % (str(action.target).lower(), varidx)
+          varidx += 1
+      idx += 1
+    code += ' ' * indent + 'ctx{0}\n'.format(idx)
+    return code
+
+  def _generate_recursive_match(indent: int, used_params: List[Parameter], transition: Transition) -> str:
+    code = ''
+    if len(used_params) == 0:
+      return _generate_action_body(indent, transition)
+    else:
+      param = used_params.pop(0)
+      renamed_param = Parameter(Identifier('var%d' % indent), param.type)
+      code += ' ' * indent + 'match {0}\n'.format(param.name)
+      code += ' ' * indent + '| let {0} => {1}\n'.format(_parameter_to_pony_signature(renamed_param), _generate_recursive_match(indent + 4 + len('| let {0} => '.format(_parameter_to_pony_signature(renamed_param))), used_params, transition).strip())
+      code += ' ' * indent + '| None => ctx0\n'
+      code += ' ' * indent + 'end'
+      return code
+
+  def _to_capitalize(string: str) -> str:
+    result = ''.join([x.capitalize() for x in string.replace(' ', '_').replace('-', '_').replace('__', '_').replace('__', '_').split('_')])
+    if result in _pony_builtin_types:
+      return "My" + result
+    else:
+      return result
+#+end_src
