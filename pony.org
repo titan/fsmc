@@ -28,12 +28,13 @@
     (name, ext) = os.path.splitext(filename)
     module = name.replace(' ', '-')
     dst = os.path.join(path, module + ext)
+    prefix = ''.join([x.capitalize() for x in module.replace('_', '-').split('-')])
     with open(dst, 'w') as f:
-      code1 = _save_states(states)
-      (code2_1, code2_2, code2_3) = _save_delegates(variables, states)
+      code1 = _save_states(states, prefix)
+      (code2_1, code2_2, code2_3) = _save_delegates(variables, states, prefix)
       code2 = code2_1 + code2_2 + code2_3
       #(open2, code2_1, code2_2, code2_3) = _save_delegates(variables, states)
-      code3 = _save_state_machine(states, code2_1 != '', code2_2 != '', code2_3 != '')
+      code3 = _save_state_machine(states, code2_1 != '', code2_2 != '', code2_3 != '', prefix)
       #open2.append(module + 'ActionDelegate')
       #open2.append(module + 'GuardDelegate')
       #open2.append(module + 'VariableDelegate')
@@ -43,12 +44,12 @@
 #+end_src
 *** states
 #+begin_src python :noweb-ref save-states
-  def _save_states(states: List[State]) -> str:
+  def _save_states(states: List[State], prefix: str) -> str:
     code = ''
     for (idx, state) in enumerate(states):
       code += 'primitive {0} fun apply(): I32 => {1}\n'.format(_to_capitalize(_pony_normalize(state.name)), idx + 1)
     code += '\n'
-    code += 'type State is ({0})\n'.format(' | '.join([_to_capitalize(_pony_normalize(x.name)) for x in states]))
+    code += 'type {0}State is ({1})\n'.format(prefix, ' | '.join([_to_capitalize(_pony_normalize(x.name)) for x in states]))
     code += '\n'
     return code
 #+end_src
@@ -57,15 +58,15 @@
   <<action-delegate>>
   <<guard-delegate>>
   <<variable-delegate>>
-  def _save_delegates(variables: List[Variable], states: List[State]) -> str:
-    code1 = _save_action_delegate(variables, states)
-    code2 = _save_guard_delegate(states)
-    code3 = _save_variable_delegate(variables)
+  def _save_delegates(variables: List[Variable], states: List[State], prefix: str) -> str:
+    code1 = _save_action_delegate(variables, states, prefix)
+    code2 = _save_guard_delegate(states, prefix)
+    code3 = _save_variable_delegate(variables, prefix)
     return (code1, code2, code3)
 #+end_src
 **** action delegate
 #+begin_src python :noweb-ref action-delegate
-  def _save_action_delegate(varaibles: List[Variable], states: List[State]) -> str:
+  def _save_action_delegate(varaibles: List[Variable], states: List[State], prefix: str) -> str:
     actions = {}
     for state in states:
       for transition in state.transitions:
@@ -97,12 +98,12 @@
         returntype = '(T, %s)' % returntype
       code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(action.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype)
     if code != '':
-      code = 'trait ActionDelegate[T: Any val]\n' + code + '\n'
+      code = 'trait ' + prefix + 'ActionDelegate[T: Any val]\n' + code + '\n'
     return code
 #+end_src
 **** guard delegate
 #+begin_src python :noweb-ref guard-delegate
-  def _save_guard_delegate(states: List[State]) -> Tuple[List[str], str]:
+  def _save_guard_delegate(states: List[State], prefix: str) -> Tuple[List[str], str]:
     calls = {}
     for state in states:
       for transition in state.transitions:
@@ -123,12 +124,12 @@
           types.append(_to_pony_primitive_type(operand.type))
       code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(call.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), 'Bool')
     if code != '':
-      code = 'trait GuardDelegate[T: Any val]\n' + code + '\n'
+      code = 'trait ' + prefix + 'GuardDelegate[T: Any val]\n' + code + '\n'
     return code
 #+end_src
 **** variable delegate
 #+begin_src python :noweb-ref variable-delegate
-  def _save_variable_delegate(variables: List[Variable]) -> Tuple[List[str], str]:
+  def _save_variable_delegate(variables: List[Variable], prefix: str) -> Tuple[List[str], str]:
     types = {}
     code = ''
     for variable in variables:
@@ -139,7 +140,7 @@
         types[type] = 0
       code += ' ' * 4 + 'fun on_{0}_changed(ctx: T, v: {1}): None\n'.format(_pony_normalize(variable.name), type)
     if code != '':
-      code = 'trait VariableDelegate[T: Any val]\n' + code + '\n'
+      code = 'trait ' + prefix + 'VariableDelegate[T: Any val]\n' + code + '\n'
     return code
 #+end_src
 *** state machine
@@ -157,7 +158,6 @@
     for (event, transitions) in events.items():
       guardmappings = {}
       for transition in transitions:
-        print(str(transition.guard))
         if transition.guard:
           guardmappings[str(transition.guard)] = transition
         else:
@@ -177,12 +177,11 @@
         if '' in guards:
           event_tag = normalize(event.name)
           extended_events[event_tag] = None
-    print(extended_events)
     return (events, [x for x in extended_events.keys()])
 
-  def _get_target_and_action_data(states: List[State], extended_eventtags: List[str]) -> Tuple[List[List[str]], List[List[str]], Mapping[str, Tuple[str, bool]]]:
+  def _get_target_and_action_data(states: List[State], extended_eventtags: List[str], prefix: str) -> Tuple[List[List[str]], List[List[str]], Mapping[str, Tuple[str, bool]]]:
     targetstable = [[0] * len(extended_eventtags)]
-    actionstable = [['_Noop'] * len(extended_eventtags)]
+    actionstable = [['_{0}Noop'.format(prefix)] * len(extended_eventtags)]
     actionblocks = {}
     actionblockid = 0
     for state in states:
@@ -201,14 +200,14 @@
               target = states.index(transition.target) - states.index(state)
               found_target = True
             if len(transition.actions) == 0:
-              action = '_Noop'
+              action = '_{0}Noop'.format(prefix)
               found_action = True
             elif len(transition.actions) == 1:
               if isinstance(transition.actions[0], Call):
                 args = ''.join([str(x) for x in transition.actions[0].operands])
                 actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transition.event.parameters]) + '\n' + str(transition.actions[0])
                 if actionblock not in actionblocks:
-                  action = '_ActionBlock%d' % actionblockid
+                  action = '_{0}ActionBlock{1}'.format(prefix, actionblockid)
                   actionblocks[actionblock] = (action, False)
                   actionblockid += 1
                   found_action = True
@@ -218,7 +217,7 @@
               elif isinstance(transition.actions[0], Assignment):
                 actionblock = str(transition.actions[0])
                 if actionblock not in actionblocks:
-                  action = '_ActionBlock%d' % actionblockid
+                  action = '_{0}ActionBlock{1}'.format(prefix, actionblockid)
                   actionblocks[actionblock] = (action, False)
                   actionblockid += 1
                   found_action = True
@@ -226,12 +225,12 @@
                   (action, _) = actionblocks[actionblock]
                   found_action = True
               else:
-                action = '_Noop'
+                action = '_{0}Noop'.format(prefix)
                 found_action = True
             else:
               actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
               if actionblock not in actionblocks:
-                action = '_ActionBlock%d' % actionblockid
+                action = '_{0}ActionBlock{1}'.format(prefix, actionblockid)
                 actionblocks[actionblock] = (action, False)
                 actionblockid += 1
               else:
@@ -240,16 +239,16 @@
         if not found_target:
           target = 0
         if not found_action:
-          action = '_Noop'
+          action = '_{0}Noop'.format(prefix)
         targets.append(target)
         actions.append(action)
       targetstable.append(targets)
       actionstable.append(actions)
     return (targetstable, actionstable, actionblocks)
 
-  def _save_state_machine(states: List[State], need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool) -> str:
+  def _save_state_machine(states: List[State], need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool, prefix: str) -> str:
     (events, extended_eventtags) = _get_event_data(states)
-    (targetstable, actionstable, actionblocks) = _get_target_and_action_data(states, extended_eventtags)
+    (targetstable, actionstable, actionblocks) = _get_target_and_action_data(states, extended_eventtags, prefix)
 
     action_parameter_signatures = _action_parameter_signatures(events)
     optional_action_parameter_signatures = _optional_action_parameter_signatures(events)
@@ -327,12 +326,12 @@
 
     delegates_in_action = []
     if need_action_delegate:
-      delegates_in_action.append('action_delegate: ActionDelegate[T]')
+      delegates_in_action.append('action_delegate: {0}ActionDelegate[T]'.format(prefix))
     if need_variable_delegate:
-      delegates_in_action.append('variable_delegate: VariableDelegate[T]')
-    actionimpl = 'interface _Action[T: Any val]\n'
+      delegates_in_action.append('variable_delegate: {0}VariableDelegate[T]'.format(prefix))
+    actionimpl = 'interface _{0}Action[T: Any val]\n'.format(prefix)
     actionimpl += ' ' * 4 + 'fun apply({0}): T\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
-    actionimpl += 'primitive _Noop[T: Any val]\n'
+    actionimpl += 'primitive _{0}Noop[T: Any val]\n'.format(prefix)
     actionimpl += ' ' * 4 + 'fun apply({0}): T => ctx0\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
     for state in states:
       for transition in state.transitions:
@@ -359,23 +358,23 @@
         actionimpl += _generate_recursive_match(8, used_params, transition)
         actionimpl += '\n'
 
-    code = 'class StateMachine[T: Any val]\n'
+    code = 'class {0}StateMachine[T: Any val]\n'.format(prefix)
     code += ' ' * 4 + 'var state: I32\n'
     delegates = []
     if need_action_delegate:
-      code += ' ' * 4 + 'var action_delegate: ActionDelegate[T]\n'
-      delegates.append('actiondelegate: ActionDelegate[T]')
+      code += ' ' * 4 + 'var action_delegate: {0}ActionDelegate[T]\n'.format(prefix)
+      delegates.append('actiondelegate: {0}ActionDelegate[T]'.format(prefix))
     if need_guard_delegate:
-      code += ' ' * 4 + 'var guard_delegate: GuardDelegate[T]\n'
-      delegates.append('guarddelegate: GuardDelegate[T]')
+      code += ' ' * 4 + 'var guard_delegate: {0}GuardDelegate[T]\n'.format(prefix)
+      delegates.append('guarddelegate: {0}GuardDelegate[T]'.format(prefix))
     if need_variable_delegate:
-      code += ' ' * 4 + 'var variable_delegate: VariableDelegate[T]\n'
-      delegates.append('variabledelegate: VariableDelegate[T]')
+      code += ' ' * 4 + 'var variable_delegate: {0}VariableDelegate[T]\n'.format(prefix)
+      delegates.append('variabledelegate: {0}VariableDelegate[T]'.format(prefix))
     code += ' ' * 4 + 'let _transition_states: Array[I32] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([str(y) for y in x]) for x in targetstable]))
-    code += ' ' * 4 + 'let _transition_actions: Array[_Action[T] val] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y + '[T]' for y in x]) for x in actionstable]))
+    code += ' ' * 4 + 'let _transition_actions: Array[_{1}Action[T] val] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y + '[T]' for y in x]) for x in actionstable]), prefix)
     code += '\n'
     code += ' ' * 4 + 'new create({0}) =>\n'.format(', '.join(delegates))
-    code += ' ' * 8 + 'state = {0}()\n'.format(_to_capitalize(normalize(states[0].name)))
+    code += ' ' * 8 + 'state = {0}()\n'.format(_to_capitalize(_pony_normalize(states[0].name)))
     if need_action_delegate:
       code += ' ' * 8 + 'action_delegate = actiondelegate\n'
     if need_guard_delegate:
@@ -385,13 +384,6 @@
     code += '\n'
     return actionimpl + code + eventimpl
 #+end_src
-
-| variable        | type                             | note                  |
-|-----------------+----------------------------------+-----------------------|
-| events          | Mapping[Event, List[Transition]] |                       |
-| extended_events | Mapping[str, Transition]         | key is event + guards |
-| guardmappings   | Mapping[str, Transition]         | key is guard          |
-| actionblocks    | Mapping[str, Tuple[str, bool]]   | key is actionblock    |
 *** utility
 #+begin_src python :noweb-ref utility
   _pony_builtin_types = ['Int', 'Float', 'Number', 'String', 'Bool', 'Array', 'List']
