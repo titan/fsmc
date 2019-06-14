@@ -98,7 +98,7 @@
         returntype = '(T, %s)' % returntype
       code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(action.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype)
     if code != '':
-      code = 'trait ' + prefix + 'ActionDelegate[T: Any val]\n' + code + '\n'
+      code = 'trait ' + prefix + 'ActionDelegate[T: Any ref]\n' + code + '\n'
     return code
 #+end_src
 **** guard delegate
@@ -124,7 +124,7 @@
           types.append(_to_pony_primitive_type(operand.type))
       code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(call.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), 'Bool')
     if code != '':
-      code = 'trait ' + prefix + 'GuardDelegate[T: Any val]\n' + code + '\n'
+      code = 'trait ' + prefix + 'GuardDelegate[T: Any ref]\n' + code + '\n'
     return code
 #+end_src
 **** variable delegate
@@ -140,7 +140,7 @@
         types[type] = 0
       code += ' ' * 4 + 'fun on_{0}_changed(ctx: T, v: {1}): None\n'.format(_pony_normalize(variable.name), type)
     if code != '':
-      code = 'trait ' + prefix + 'VariableDelegate[T: Any val]\n' + code + '\n'
+      code = 'trait ' + prefix + 'VariableDelegate[T: Any ref]\n' + code + '\n'
     return code
 #+end_src
 *** state machine
@@ -326,12 +326,12 @@
 
     delegates_in_action = []
     if need_action_delegate:
-      delegates_in_action.append('action_delegate: {0}ActionDelegate[T]'.format(prefix))
+      delegates_in_action.append('action_delegate: {0}ActionDelegate[T] val'.format(prefix))
     if need_variable_delegate:
-      delegates_in_action.append('variable_delegate: {0}VariableDelegate[T]'.format(prefix))
-    actionimpl = 'interface _{0}Action[T: Any val]\n'.format(prefix)
+      delegates_in_action.append('variable_delegate: {0}VariableDelegate[T] val'.format(prefix))
+    actionimpl = 'interface _{0}Action[T: Any ref]\n'.format(prefix)
     actionimpl += ' ' * 4 + 'fun apply({0}): T\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
-    actionimpl += 'primitive _{0}Noop[T: Any val]\n'.format(prefix)
+    actionimpl += 'primitive _{0}Noop[T: Any ref]\n'.format(prefix)
     actionimpl += ' ' * 4 + 'fun apply({0}): T => ctx0\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
     for state in states:
       for transition in state.transitions:
@@ -352,24 +352,24 @@
           continue
         actionfun = action
         actionblocks[actionblock] = (action, True)
-        actionimpl += 'primitive {0}[T: Any val]\n'.format(actionfun)
+        actionimpl += 'primitive {0}[T: Any ref]\n'.format(actionfun)
         actionimpl += ' ' * 4 + 'fun apply({0}): T =>\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
         used_params = _get_used_parameters(transition)
-        actionimpl += _generate_recursive_match(8, used_params, transition)
+        actionimpl += _generate_recursive_match(8, used_params, {}, transition)
         actionimpl += '\n'
 
-    code = 'class {0}StateMachine[T: Any val]\n'.format(prefix)
+    code = 'class {0}StateMachine[T: Any ref]\n'.format(prefix)
     code += ' ' * 4 + 'var state: I32\n'
     delegates = []
     if need_action_delegate:
-      code += ' ' * 4 + 'var action_delegate: {0}ActionDelegate[T]\n'.format(prefix)
-      delegates.append('actiondelegate: {0}ActionDelegate[T]'.format(prefix))
+      code += ' ' * 4 + 'var action_delegate: {0}ActionDelegate[T] val\n'.format(prefix)
+      delegates.append('actiondelegate: {0}ActionDelegate[T] val'.format(prefix))
     if need_guard_delegate:
-      code += ' ' * 4 + 'var guard_delegate: {0}GuardDelegate[T]\n'.format(prefix)
-      delegates.append('guarddelegate: {0}GuardDelegate[T]'.format(prefix))
+      code += ' ' * 4 + 'var guard_delegate: {0}GuardDelegate[T] val\n'.format(prefix)
+      delegates.append('guarddelegate: {0}GuardDelegate[T] val'.format(prefix))
     if need_variable_delegate:
-      code += ' ' * 4 + 'var variable_delegate: {0}VariableDelegate[T]\n'.format(prefix)
-      delegates.append('variabledelegate: {0}VariableDelegate[T]'.format(prefix))
+      code += ' ' * 4 + 'var variable_delegate: {0}VariableDelegate[T] val\n'.format(prefix)
+      delegates.append('variabledelegate: {0}VariableDelegate[T] val'.format(prefix))
     code += ' ' * 4 + 'let _transition_states: Array[I32] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([str(y) for y in x]) for x in targetstable]))
     code += ' ' * 4 + 'let _transition_actions: Array[_{1}Action[T] val] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y + '[T]' for y in x]) for x in actionstable]), prefix)
     code += '\n'
@@ -388,19 +388,12 @@
 #+begin_src python :noweb-ref utility
   _pony_builtin_types = ['Int', 'Float', 'Number', 'String', 'Bool', 'Array', 'List']
 
-  def _to_pony_primitive_type(origin_type: str) -> str:
-    types = {
-      "bool": "Bool",
-      "char": "U8",
-      "int": "Int",
-      "float": "Float",
-      "number": "Number",
-      "string": "String",
-    }
-    if origin_type in types:
-      return types[origin_type]
+  def _to_capitalize(string: str) -> str:
+    result = ''.join([x.capitalize() for x in string.replace(' ', '_').replace('-', '_').replace('__', '_').replace('__', '_').split('_')])
+    if result in _pony_builtin_types:
+      return "My" + result
     else:
-      return origin_type
+      return result
 
   def _pony_normalize(string: str) -> str:
     keywords = ["box", "iso", "ref", "tag", "trn", "val", "actor", "addressof", "as", "be", "break", "class", "compiler_intrinsic", "consume", "continue", "do", "else", "elseif", "embed", "end", "error", "for", "fun", "if", "ifdef", "in", "interface", "is", "isnt", "lambda", "let", "match", "new", "not", "object", "primitive", "recover", "repeat", "return", "struct", "then", "this", "trait", "try", "type", "until", "use", "var", "where", "while", "with", "actor", "be", "class", "else", "for", "fun", "if", "ifdef", "interface", "match", "new", "primitive", "recover", "ref", "repeat", "struct", "tag", "then", "trait", "try", "until", "while", "with", "false", "true", "None"]
@@ -416,6 +409,20 @@
       return 'my_' + result
     else:
       return result
+
+  def _to_pony_primitive_type(origin_type: str) -> str:
+    types = {
+      "bool": "Bool",
+      "char": "U8",
+      "int": "Int",
+      "float": "Float",
+      "number": "Number",
+      "string": "String",
+    }
+    if origin_type in types:
+      return types[origin_type]
+    else:
+      return _to_capitalize(origin_type)
 
   def _parameter_to_pony_signature(p: Parameter) -> str:
     if p.type in _pony_builtin_types:
@@ -455,13 +462,18 @@
                   params[str(arg)] = param
     return [x for x in params.values()]
 
-  def _generate_action_body(indent: int, transition: Transition) -> str:
+  def _generate_action_body(indent: int, transition: Transition, renamed_args: Mapping[str, str]) -> str:
     code = ''
     idx = 0
     varidx = 0
     for action in transition.actions:
       if isinstance(action, Call):
-        code += ' ' * indent + 'let ctx{0} = action_delegate.{1}({2})\n'.format(idx + 1, _pony_normalize(str(action.operator)), ', '.join(['ctx%d' % idx] + [str(x) for x in action.operands]))
+        used_args = []
+        keys = renamed_args.keys()
+        for operand in action.operands:
+          if str(operand.name) in keys:
+            used_args.append(renamed_args[str(operand.name)])
+        code += ' ' * indent + 'let ctx{0} = action_delegate.{1}({2})\n'.format(idx + 1, _pony_normalize(str(action.operator)), ', '.join(['ctx%d' % idx] + used_args))
       elif isinstance(action, Assignment):
         if isinstance(action.expression, Identifier):
           code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}(ctx{3})\n'.format(idx + 1, varidx, _pony_normalize(str(action.expression)), idx)
@@ -469,7 +481,12 @@
           varidx += 1
         elif isinstance(action.expression, Call):
           call = action.expression
-          code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}({3})\n'.format(idx + 1, varidx, _pony_normalize(str(call.operator)), ', '.join(['ctx%d' % idx] + [str(x) for x in call.operands]))
+          used_args = []
+          keys = renamed_args.keys()
+          for operand in call.operands:
+            if str(operand.name) in keys:
+              used_args.append(renamed_args[str(operand.name)])
+          code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}({3})\n'.format(idx + 1, varidx, _pony_normalize(str(call.operator)), ', '.join(['ctx%d' % idx] + used_args))
           code += ' ' * indent + 'variable_delegate.on_%s_changed(var%d)\n' % (str(action.target).lower(), varidx)
           varidx += 1
         else:
@@ -480,23 +497,17 @@
     code += ' ' * indent + 'ctx{0}\n'.format(idx)
     return code
 
-  def _generate_recursive_match(indent: int, used_params: List[Parameter], transition: Transition) -> str:
+  def _generate_recursive_match(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], transition: Transition) -> str:
     code = ''
     if len(used_params) == 0:
-      return _generate_action_body(indent, transition)
+      return _generate_action_body(indent, transition, renamed_args)
     else:
       param = used_params.pop(0)
       renamed_param = Parameter(Identifier('var%d' % indent), param.type)
+      renamed_args[str(param.name)] = 'var%d' % indent
       code += ' ' * indent + 'match {0}\n'.format(param.name)
-      code += ' ' * indent + '| let {0} => {1}\n'.format(_parameter_to_pony_signature(renamed_param), _generate_recursive_match(indent + 4 + len('| let {0} => '.format(_parameter_to_pony_signature(renamed_param))), used_params, transition).strip())
+      code += ' ' * indent + '| let {0} =>\n{1}\n'.format(_parameter_to_pony_signature(renamed_param), ' ' * (indent + 4) + _generate_recursive_match(indent + 4, used_params, renamed_args, transition).strip())
       code += ' ' * indent + '| None => ctx0\n'
-      code += ' ' * indent + 'end'
+      code += ' ' * indent + 'end\n'
       return code
-
-  def _to_capitalize(string: str) -> str:
-    result = ''.join([x.capitalize() for x in string.replace(' ', '_').replace('-', '_').replace('__', '_').replace('__', '_').split('_')])
-    if result in _pony_builtin_types:
-      return "My" + result
-    else:
-      return result
 #+end_src
