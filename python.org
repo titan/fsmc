@@ -157,7 +157,7 @@
         eventimpl += ' ' * 4 + 'self._transition_actions[fromstate][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
         eventimpl += ' ' * 4 + 'self.state += _transition_states[fromstate][self.%s]\n' % event_tag
         if debug:
-          eventimpl += ' ' * 4 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[self.state][%d]))\n' % (str(event), extended_events[event_tag][1])
+          eventimpl += ' ' * 4 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event), extended_events[event_tag][1])
       else:
         firstline = True
         for guardstr in guards:
@@ -176,7 +176,7 @@
           eventimpl += ' ' * 6 + 'self._transition_actions[fromstate][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
           eventimpl += ' ' * 6 + 'self.state += _transition_states[fromstate][self.%s]\n' % event_tag
           if debug:
-            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s[%s]", _state_strings[self.state], _action_strings[self.state][%d]))\n' % (str(event), guardstr.replace('"', '\\"'), extended_events[event_tag][1])
+            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s[%s]", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event), guardstr.replace('"', '\\"'), extended_events[event_tag][1])
           firstline = False
         if '' in guards:
           event_tag = normalize(event.name)
@@ -187,7 +187,7 @@
           eventimpl += ' ' * 6 + 'self._transition_actions[fromstate][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
           eventimpl += ' ' * 6 + 'self.state += _transition_states[fromstate][self.%s]\n' % event_tag
           if debug:
-            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[self.state][%d]))\n' % (str(event), extended_events[event_tag][1])
+            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event), extended_events[event_tag][1])
       eventimpl += '\n'
 
     eventdef = ''
@@ -310,7 +310,11 @@
     actionimpl += ' ' * 4 + 'pass\n\n'
     for paramdecls in noopblocks.keys():
       action = noopblocks[paramdecls]
-      actionimpl += ' ' * 2 + 'def {0}(self, {1}):\n'.format(action.replace('self.', ''), ', '.join(['ctx', paramdecls]))
+      if len(paramdecls) != 0:
+        params = ['ctx', paramdecls]
+      else:
+        params = ['ctx']
+      actionimpl += ' ' * 2 + 'def {0}(self, {1}):\n'.format(action.replace('self.', ''), ', '.join(params))
       actionimpl += ' ' * 4 + 'pass\n\n'
     for state in states:
       for transition in state.transitions:
@@ -350,7 +354,9 @@
               actionimpl += ' ' * 4 + '%s = self.action_delegate.%s(ctx)\n' % (str(action.target), _python_normalize(str(action.expression)))
               actionimpl += ' ' * 4 + 'self.variable_delegate.on_%s_changed(%s)\n' % (str(action.target).lower(), str(action.target))
         actionimpl += '\n'
-    code = '_transition_states = [%s]\n\n\n' % (', '.join(statestable))
+    code = '_transition_states = [\n'
+    code += '  %s' % (',\n  '.join(statestable))
+    code += '\n]\n\n\n'
     if debug:
       code += '_action_strings = [\n'
       code += '  %s' % ',\n  '.join(stringstable)
@@ -362,7 +368,10 @@
     code += ' ' * 4 + 'self.action_delegate = action_delegate\n'
     code += ' ' * 4 + 'self.guard_delegate = guard_delegate\n'
     code += ' ' * 4 + 'self.variable_delegate = variable_delegate\n'
-    code += ' ' * 4 + 'self._transition_actions = [%s]\n' % ', '.join(actionstable)
+    code += ' ' * 4 + 'self._transition_actions = [\n'
+    code += ' ' * 8 + '%s' % (',\n' + ' ' * 8).join(actionstable)
+    code += '\n'
+    code += ' ' * 4 + ']\n'
     code += '\n'
     return code + eventimpl + actionimpl
 #+end_src
