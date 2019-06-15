@@ -188,7 +188,7 @@
       return Literal('', 'char')
 
     def escaped_char(self, ctx):
-      ch = ''.join(ctx.buffer)
+      ch = '\\' + ''.join(ctx.buffer)
       return Literal(ch, 'char')
 
     def string(self, ctx):
