@@ -46,7 +46,7 @@
         continue
       guard = None
       parameters = []
-      result = re.search('(.*)\((.*)\)\[(.*)\]', header.value)
+      result = re.search('(.*)\((.*)\)\[(.*)\]', str(header.value))
       if result:
         eventname = result.group(1).strip()
 
@@ -66,7 +66,7 @@
         syntaxer.eof()
         guard = syntaxer.result()
       else:
-        result = re.search('(.*)\((.*)\)', header.value)
+        result = re.search('(.*)\((.*)\)', str(header.value))
         if result:
           eventname = result.group(1).strip()
           syntaxer = ParameterSyntaxer()
@@ -77,21 +77,21 @@
           syntaxer.eof()
           parameters = syntaxer.result()
         else:
-          eventname = header.value.strip()
+          eventname = str(header.value).strip()
       if eventname not in uniqevents:
         event = Event()
         event.name = eventname
         for parameter in parameters:
-          event.parameters.append(_verify_parameter(parameter, header))
+          event.parameters.append(_verify_parameter(parameter, str(header.value)))
         uniqevents[eventname] = event
       else:
         event = uniqevents[eventname]
-      events.append((_verify_event(event, header), guard))
+      events.append((_verify_event(event, str(header.value)), guard))
     return events
 #+end_src
 **** verify-parameter
 #+begin_src python :noweb-ref verify-parameter
-  def _verify_parameter(p: Parameter, d) -> Parameter:
+  def _verify_parameter(p: Parameter, d: str) -> Parameter:
     if not p.name:
       print('Missing name in parameter: %s' % d)
       exit(1)
@@ -102,7 +102,7 @@
 #+end_src
 **** verify-event
 #+begin_src python :noweb-ref verify-event
-  def _verify_event(e: Event, d) -> Event:
+  def _verify_event(e: Event, d: str) -> Event:
     if not e.name:
       print('Missing name in event: %s' % d)
       exit(1)
@@ -129,10 +129,10 @@
         transition = Transition()
         transition._targetstrs = []
         transition._targetstr = None
+        transition.event = headers[j - 1][0]
+        transition.guard = headers[j - 1][1]
         cell = row[j]
         if cell.value:
-          transition.event = headers[j - 1][0]
-          transition.guard = headers[j - 1][1]
           lines = cell.value.split('\n')
           state_mode = False
           for line in lines:
@@ -158,6 +158,8 @@
               transition._targetstrs.append(line)
           if len(transition._targetstrs) > 0:
             transition._targetstr = '\n'.join(transition._targetstrs)
+          state.transitions.append(transition)
+        else:
           state.transitions.append(transition)
       states.append(state)
     for state in states:
