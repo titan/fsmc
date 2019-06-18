@@ -426,7 +426,7 @@
       return result
 
   def _pony_normalize(string: str) -> str:
-    keywords = ["box", "iso", "ref", "tag", "trn", "val", "actor", "addressof", "as", "be", "break", "class", "compiler_intrinsic", "consume", "continue", "do", "else", "elseif", "embed", "end", "error", "for", "fun", "if", "ifdef", "in", "interface", "is", "isnt", "lambda", "let", "match", "new", "not", "object", "primitive", "recover", "repeat", "return", "struct", "then", "this", "trait", "try", "type", "until", "use", "var", "where", "while", "with", "actor", "be", "class", "else", "for", "fun", "if", "ifdef", "interface", "match", "new", "primitive", "recover", "ref", "repeat", "struct", "tag", "then", "trait", "try", "until", "while", "with", "false", "true", "None"]
+    keywords = ["box", "iso", "ref", "tag", "trn", "val", "actor", "addressof", "as", "be", "break", "class", "compiler_intrinsic", "consume", "continue", "create", "do", "else", "elseif", "embed", "end", "error", "for", "fun", "if", "ifdef", "in", "interface", "is", "isnt", "lambda", "let", "match", "new", "not", "object", "primitive", "recover", "repeat", "return", "struct", "then", "this", "trait", "try", "type", "until", "use", "var", "where", "while", "with", "actor", "be", "class", "else", "for", "fun", "if", "ifdef", "interface", "match", "new", "primitive", "recover", "ref", "repeat", "struct", "tag", "then", "trait", "try", "until", "while", "with", "false", "true", "None"]
     string = string.strip()
     if string == '-':
       string = 'minus'
