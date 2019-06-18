@@ -77,7 +77,18 @@
           syntaxer.eof()
           parameters = syntaxer.result()
         else:
-          eventname = str(header.value).strip()
+          result = re.search('(.*)\[(.*)\]', str(header.value))
+          if result:
+            eventname = result.group(1).strip()
+            syntaxer = GuardSyntaxer()
+            lexer = Lexer(GuardLexerAdapter(syntaxer))
+            for ch in result.group(2):
+              lexer.feed(ch)
+            lexer.eof()
+            syntaxer.eof()
+            guard = syntaxer.result()
+          else:
+            eventname = str(header.value).strip()
       if eventname not in uniqevents:
         event = Event()
         event.name = eventname

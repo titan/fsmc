@@ -313,9 +313,9 @@
           (transition, event_tag) = guardmappings[guardstr]
           guard = transition.guard
           if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
-            eventimpl += ' ' * 8 + ('else' if not firstline else '') + 'if guard_delegate.{0}({1}) then\n'.format(str(guard.expr.entity.operator), ', '.join(['ctx'] + [str(x) for x in guard.expr.entity.operands]))
+            eventimpl += ' ' * 8 + ('else' if not firstline else '') + 'if guard_delegate.{0}({1}) then\n'.format(_pony_normalize(str(guard.expr.entity.operator)), ', '.join(['ctx'] + [str(x) for x in guard.expr.entity.operands]))
           else:
-            eventimpl += ' ' * 8 + ('else' if not firstline else '') + 'if {0} then\n'.format(str(guard))
+            eventimpl += ' ' * 8 + ('else' if not firstline else '') + 'if {0} then\n'.format(_pony_normalize(str(guard)))
           eventimpl += ' ' * 12 + 'let idx = USize.from[I32]((state * {0}) + {1})\n'.format(len(extended_events), extended_eventtags.index(event_tag))
           if debug:
             eventimpl += ' ' * 12 + 'match _logger\n'
