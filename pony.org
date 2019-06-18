@@ -42,9 +42,9 @@
   def _save_states(states: List[State], prefix: str) -> str:
     code = ''
     for (idx, state) in enumerate(states):
-      code += 'primitive {0} fun apply(): I32 => {1}\n'.format(_to_capitalize(_pony_normalize(state.name)), idx + 1)
+      code += 'primitive {0} fun apply(): I32 => {1}\n'.format(prefix + _to_capitalize(_pony_normalize(state.name)), idx + 1)
     code += '\n'
-    code += 'type {0}State is ({1})\n'.format(prefix, ' | '.join([_to_capitalize(_pony_normalize(x.name)) for x in states]))
+    code += 'type {0}State is ({1})\n'.format(prefix, ' | '.join([prefix + _to_capitalize(_pony_normalize(x.name)) for x in states]))
     code += '\n'
     return code
 #+end_src
@@ -403,7 +403,7 @@
     code += '\n'
     delegates.append('logger: (Logger[String] | None) = None')
     code += ' ' * 4 + 'new create({0}) =>\n'.format(', '.join(delegates))
-    code += ' ' * 8 + 'state = {0}()\n'.format(_to_capitalize(_pony_normalize(states[0].name)))
+    code += ' ' * 8 + 'state = {0}()\n'.format(prefix + _to_capitalize(_pony_normalize(states[0].name)))
     if need_action_delegate:
       code += ' ' * 8 + 'action_delegate = actiondelegate\n'
     if need_guard_delegate:
