@@ -344,6 +344,9 @@
           eventimpl += ' ' * 12 + 'else\n'
           eventimpl += ' ' * 16 + 'ctx\n'
           eventimpl += ' ' * 12 + 'end\n'
+        else:
+          eventimpl += ' ' * 8 + 'else\n'
+          eventimpl += ' ' * 12 + 'ctx\n'
         eventimpl += ' ' * 8 + 'end\n'
       eventimpl += '\n'
 
