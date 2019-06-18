@@ -81,12 +81,12 @@
         if isinstance(operand, Identifier):
           for param in event.parameters:
             if str(param.name) == str(operand):
-              types.append(_to_pony_primitive_type(str(param.type)).capitalize())
+              types.append(_to_pony_primitive_type(str(param.type)))
               break
         elif isinstance(operand, Literal):
           types.append(_to_pony_primitive_type(operand.type))
       if action.type != None:
-        returntype = _to_pony_primitive_type(_pony_normalize(str(action.type))).capitalize()
+        returntype = _to_pony_primitive_type(_pony_normalize(str(action.type)))
       if returntype == '':
         returntype = 'T'
       else:
@@ -113,7 +113,7 @@
         if isinstance(operand, Identifier):
           for param in event.parameters:
             if str(param.name) == str(operand):
-              types.append(_to_pony_primitive_type(str(param.type)).capitalize())
+              types.append(_to_pony_primitive_type(str(param.type)))
               break
         elif isinstance(operand, Literal):
           types.append(_to_pony_primitive_type(operand.type))
@@ -131,7 +131,7 @@
       if variable.type in _pony_builtin_types:
         type = variable.type
       else:
-        type = _to_pony_primitive_type(variable.type).capitalize()
+        type = _to_pony_primitive_type(variable.type)
         types[type] = 0
       code += ' ' * 4 + 'fun on_{0}_changed(ctx: T, v: {1}): None\n'.format(_pony_normalize(variable.name), type)
     if code != '':
@@ -445,6 +445,7 @@
       "bool": "Bool",
       "char": "U8",
       "int": "Int",
+      "long": "ILong",
       "float": "Float",
       "number": "Number",
       "string": "String",
@@ -458,7 +459,7 @@
     if p.type in _pony_builtin_types:
       return '%s: %s' % (p.name, p.type)
     else:
-      return '%s: %s' % (p.name, _to_pony_primitive_type(str(p.type)).capitalize())
+      return '%s: %s' % (p.name, _to_pony_primitive_type(str(p.type)))
 
   def _action_parameter_signatures(events: List[Event]) -> List[str]:
     parameters = {}
