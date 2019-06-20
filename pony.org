@@ -2,7 +2,7 @@
 * Pony
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/pony.py
-  from typing import List, Mapping, Tuple
+  from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transition, Variable
   from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
   from analyzer import find_call_in_expression
@@ -31,11 +31,16 @@
     prefix = ''.join([x.capitalize() for x in module.replace('_', '-').split('-')])
     with open(dst, 'w') as f:
       code1 = _save_states(states, prefix)
-      (code2_1, code2_2, code2_3) = _save_delegates(variables, states, prefix)
+      (code2_1, code2_2, code2_3) = _save_delegates(variables, states, prefix, False)
       code2 = code2_1 + code2_2 + code2_3
-      code3 = _save_state_machine(states, args.debug, code2_1 != '', code2_2 != '', code2_3 != '', prefix)
-      f.write('use "logger"\n\n')
+      code3 = _save_state_machine(states, args.debug, code2_1 != '', code2_2 != '', code2_3 != '', prefix, False)
+      f.write('use "logger"\n')
+      f.write('use "promises"\n\n')
       f.write(code1 + code2 + code3)
+      (code2_1, code2_2, code2_3) = _save_delegates(variables, states, prefix, True)
+      code2 = code2_1 + code2_2 + code2_3
+      code3 = _save_state_machine(states, args.debug, code2_1 != '', code2_2 != '', code2_3 != '', prefix, True)
+      f.write(code2 + code3)
 #+end_src
 *** states
 #+begin_src python :noweb-ref save-states
@@ -53,15 +58,15 @@
   <<action-delegate>>
   <<guard-delegate>>
   <<variable-delegate>>
-  def _save_delegates(variables: List[Variable], states: List[State], prefix: str) -> str:
-    code1 = _save_action_delegate(variables, states, prefix)
-    code2 = _save_guard_delegate(states, prefix)
-    code3 = _save_variable_delegate(variables, prefix)
+  def _save_delegates(variables: List[Variable], states: List[State], prefix: str, promise: bool) -> str:
+    code1 = _save_action_delegate(variables, states, prefix, promise)
+    code2 = _save_guard_delegate(states, prefix, promise)
+    code3 = _save_variable_delegate(variables, prefix, promise)
     return (code1, code2, code3)
 #+end_src
 **** action delegate
 #+begin_src python :noweb-ref action-delegate
-  def _save_action_delegate(varaibles: List[Variable], states: List[State], prefix: str) -> str:
+  def _save_action_delegate(varaibles: List[Variable], states: List[State], prefix: str, promise: bool) -> str:
     actions = {}
     for state in states:
       for transition in state.transitions:
@@ -91,14 +96,19 @@
         returntype = 'T'
       else:
         returntype = '(T, %s)' % returntype
+      if promise:
+        returntype = 'Promise[{0}]'.format(returntype)
       code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(action.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype)
     if code != '':
-      code = 'trait ' + prefix + 'ActionDelegate[T: Any ref]\n' + code + '\n'
+      if promise:
+        code = 'trait val ' + prefix + 'AsyncActionDelegate[T: Any #share]\n' + code + '\n'
+      else:
+        code = 'trait ' + prefix + 'ActionDelegate[T: Any ref]\n' + code + '\n'
     return code
 #+end_src
 **** guard delegate
 #+begin_src python :noweb-ref guard-delegate
-  def _save_guard_delegate(states: List[State], prefix: str) -> Tuple[List[str], str]:
+  def _save_guard_delegate(states: List[State], prefix: str, promise: bool) -> Tuple[List[str], str]:
     calls = {}
     for state in states:
       for transition in state.transitions:
@@ -119,12 +129,15 @@
           types.append(_to_pony_primitive_type(operand.type))
       code += ' ' * 4 + 'fun {0}({1}): {2}\n'.format(_pony_normalize(str(call.operator)), ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), 'Bool')
     if code != '':
-      code = 'trait ' + prefix + 'GuardDelegate[T: Any ref]\n' + code + '\n'
+      if promise:
+        code = 'trait val ' + prefix + 'AsyncGuardDelegate[T: Any #share]\n' + code + '\n'
+      else:
+        code = 'trait ' + prefix + 'GuardDelegate[T: Any ref]\n' + code + '\n'
     return code
 #+end_src
 **** variable delegate
 #+begin_src python :noweb-ref variable-delegate
-  def _save_variable_delegate(variables: List[Variable], prefix: str) -> Tuple[List[str], str]:
+  def _save_variable_delegate(variables: List[Variable], prefix: str, promise: bool) -> Tuple[List[str], str]:
     types = {}
     code = ''
     for variable in variables:
@@ -135,7 +148,10 @@
         types[type] = 0
       code += ' ' * 4 + 'fun on_{0}_changed(ctx: T, v: {1}): None\n'.format(_pony_normalize(variable.name), type)
     if code != '':
-      code = 'trait ' + prefix + 'VariableDelegate[T: Any ref]\n' + code + '\n'
+      if promise:
+        code = 'trait val ' + prefix + 'AsyncVariableDelegate[T: Any #share]\n' + code + '\n'
+      else:
+        code = 'trait ' + prefix + 'VariableDelegate[T: Any ref]\n' + code + '\n'
     return code
 #+end_src
 *** state machine
@@ -260,7 +276,7 @@
       actionstable.append(actions)
     return (targetstable, actionstable, actionblocks, stringstable)
 
-  def _save_state_machine(states: List[State], debug: bool, need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool, prefix: str) -> str:
+  def _save_state_machine(states: List[State], debug: bool, need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool, prefix: str, promise: bool) -> str:
     (events, extended_events) = _get_event_data(states)
     extended_eventtags = [x for x in extended_events.keys()]
     (targetstable, actionstable, actionblocks, actionstringstable) = _get_target_and_action_data(states, extended_events, prefix)
@@ -269,15 +285,43 @@
     optional_action_parameter_signatures = _optional_action_parameter_signatures(events)
 
     delegates_in_event = []
+    delegates_in_exec = []
     if need_action_delegate:
       delegates_in_event.append('action_delegate')
+      delegates_in_exec.append('action_delegate')
+    if need_guard_delegate and promise:
+      delegates_in_exec.append('guard_delegate')
     if need_variable_delegate:
       delegates_in_event.append('variable_delegate')
+      delegates_in_exec.append('variable_delegate')
 
-    eventimpl = ''
+    if promise:
+      eventimpl = ' ' * 4 + 'fun val _exec(%s): Promise[(%sAsyncStateMachine[T], T)] =>\n' % (', '.join(["idx: USize", "ctx: T"] + optional_action_parameter_signatures), prefix)
+      eventimpl += ' ' * 8 + "try\n"
+      eventimpl += ' ' * 12 + "let p = _transition_actions(idx)?({0})\n".format(', '.join(delegates_in_event + ['ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
+      eventimpl += ' ' * 12 + 'let newstate = state + _transition_states(idx)?\n'
+      eventimpl += ' ' * 12 + "p.next[({prefix}AsyncStateMachine[T], T)]({{(ctx': T) => ({prefix}AsyncStateMachine[T]({delegates} where state' = newstate, logger = _logger), ctx')}})\n".format(prefix = prefix, delegates = ', '.join(delegates_in_exec))
+      eventimpl += ' ' * 8 + "else\n"
+      eventimpl += ' ' * 12 + "let p = Promise[(%sAsyncStateMachine[T], T)]\n" % prefix
+      eventimpl += ' ' * 12 + "p((this, ctx))\n"
+      eventimpl += ' ' * 12 + "p\n"
+      eventimpl += ' ' * 8 + "end\n\n"
+    else:
+      eventimpl = ' ' * 4 + 'fun ref _exec(%s): T =>\n' % (', '.join(["idx: USize", "ctx: T"] + optional_action_parameter_signatures))
+      eventimpl += ' ' * 8 + "try\n"
+      eventimpl += ' ' * 12 + "let ctx': T = _transition_actions(idx)?({0})\n".format(', '.join(delegates_in_event + ['ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
+      eventimpl += ' ' * 12 + 'state = state + _transition_states(idx)?\n'
+      eventimpl += ' ' * 12 + "ctx'\n"
+      eventimpl += ' ' * 8 + "else\n"
+      eventimpl += ' ' * 12 + "ctx\n"
+      eventimpl += ' ' * 8 + "end\n\n"
+
     for (event, guardmappings) in events.items():
       parameter_signatures = [_parameter_to_pony_signature(x) for x in event.parameters]
-      eventimpl += ' ' * 4 + 'fun ref %s(%s): T =>\n' % (_pony_normalize(event.name), ', '.join(["ctx: T"] + parameter_signatures))
+      if promise:
+        eventimpl += ' ' * 4 + 'fun val %s(%s): Promise[(%sAsyncStateMachine[T], T)] =>\n' % (_pony_normalize(event.name), ', '.join(["ctx: T"] + parameter_signatures), prefix)
+      else:
+        eventimpl += ' ' * 4 + 'fun ref %s(%s): T =>\n' % (_pony_normalize(event.name), ', '.join(["ctx: T"] + parameter_signatures))
       guards = [x for x in guardmappings.keys()]
       if len(guards) == 1 and guards[0] == '':
         args = []
@@ -292,13 +336,7 @@
           eventimpl += ' ' * 8 + 'match _logger\n'
           eventimpl += ' ' * 8 + '| let logger: Logger[String] => try logger(Info) and logger.log("(" + _state_strings(USize.from[I32](state))? + ", {0}) => (" + _state_strings(USize.from[I32](state + _transition_states(idx)?))? + ", " + _action_strings(idx)? + ")", __loc) else logger(Info) and logger.log("Index is out of bounds") end\n'.format(str(event).replace("()", ""))
           eventimpl += ' ' * 8 + 'end\n'
-        eventimpl += ' ' * 8 + 'try\n'
-        eventimpl += ' ' * 12 + "let ctx': T = _transition_actions(idx)?({0})\n".format(', '.join(delegates_in_event + ['ctx'] + args))
-        eventimpl += ' ' * 12 + 'state = state + _transition_states(idx)?\n'
-        eventimpl += ' ' * 12 + "ctx'\n"
-        eventimpl += ' ' * 8 + 'else\n'
-        eventimpl += ' ' * 12 + 'ctx\n'
-        eventimpl += ' ' * 8 + 'end\n'
+        eventimpl += ' ' * 8 + '_exec(%s)\n' % (', '.join(['idx', 'ctx'] + args))
       else:
         firstline = True
         args = []
@@ -321,13 +359,7 @@
             eventimpl += ' ' * 12 + 'match _logger\n'
             eventimpl += ' ' * 12 + '| let logger: Logger[String] => try logger(Info) and logger.log("(" + _state_strings(USize.from[I32](state))? + ", {0}[{1}]) => (" + _state_strings(USize.from[I32](state + _transition_states(idx)?))? + ", " + _action_strings(idx)? + ")", __loc) else logger(Info) and logger.log("Index is out of bounds") end\n'.format(str(event).replace("()", ""), guardstr.replace('"', '\\"').replace('\\', '\\\\'))
             eventimpl += ' ' * 12 + 'end\n'
-          eventimpl += ' ' * 12 + 'try\n'
-          eventimpl += ' ' * 16 + "let ctx': T = _transition_actions(idx)?({0})\n".format(', '.join(delegates_in_event + ['ctx'] + args))
-          eventimpl += ' ' * 16 + 'state = state + _transition_states(idx)?\n'
-          eventimpl += ' ' * 16 + "ctx'\n"
-          eventimpl += ' ' * 12 + 'else\n'
-          eventimpl += ' ' * 16 + 'ctx\n'
-          eventimpl += ' ' * 12 + 'end\n'
+          eventimpl += ' ' * 12 + '_exec(%s)\n' % (', '.join(['idx', 'ctx'] + args))
           firstline = False
         if '' in guards:
           eventimpl += ' ' * 8 + 'else\n'
@@ -337,28 +369,42 @@
             eventimpl += ' ' * 12 + 'match _logger\n'
             eventimpl += ' ' * 12 + '| let logger: Logger[String] => try logger(Info) and logger.log("(" + _state_strings(USize.from[I32](state))? + ", {0}) => (" + _state_strings(USize.from[I32](state + _transition_states(idx)?))? + ", " + _action_strings(idx)? + ")", __loc) else logger(Info) and logger.log("Index is out of bounds") end\n'.format(str(event).replace("()", ""))
             eventimpl += ' ' * 12 + 'end\n'
-          eventimpl += ' ' * 12 + 'try\n'
-          eventimpl += ' ' * 16 + "let ctx': T = _transition_actions(idx)?({0})\n".format(', '.join(delegates_in_event + ['ctx'] + args))
-          eventimpl += ' ' * 16 + 'state = state + _transition_states(idx)?\n'
-          eventimpl += ' ' * 16 + "ctx'\n"
-          eventimpl += ' ' * 12 + 'else\n'
-          eventimpl += ' ' * 16 + 'ctx\n'
-          eventimpl += ' ' * 12 + 'end\n'
+          eventimpl += ' ' * 12 + '_exec(%s)\n' % (', '.join(['idx', 'ctx'] + args))
         else:
           eventimpl += ' ' * 8 + 'else\n'
-          eventimpl += ' ' * 12 + 'ctx\n'
+          if promise:
+            eventimpl += ' ' * 12 + "let p = Promise[(%sAsyncStateMachine[T], T)]\n" % prefix
+            eventimpl += ' ' * 12 + "p((this, ctx))\n"
+            eventimpl += ' ' * 12 + "p\n"
+          else:
+            eventimpl += ' ' * 12 + 'ctx\n'
         eventimpl += ' ' * 8 + 'end\n'
       eventimpl += '\n'
 
     delegates_in_action = []
     if need_action_delegate:
-      delegates_in_action.append('action_delegate: {0}ActionDelegate[T] val'.format(prefix))
+      if promise:
+        delegates_in_action.append('action_delegate: {0}AsyncActionDelegate[T]'.format(prefix))
+      else:
+        delegates_in_action.append('action_delegate: {0}ActionDelegate[T] val'.format(prefix))
     if need_variable_delegate:
-      delegates_in_action.append('variable_delegate: {0}VariableDelegate[T] val'.format(prefix))
-    actionimpl = 'interface _{0}Action[T: Any ref]\n'.format(prefix)
-    actionimpl += ' ' * 4 + 'fun apply({0}): T\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
-    actionimpl += 'primitive _{0}Noop[T: Any ref]\n'.format(prefix)
-    actionimpl += ' ' * 4 + 'fun apply({0}): T => ctx0\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+      if promise:
+        delegates_in_action.append('variable_delegate: {0}AsyncVariableDelegate[T]'.format(prefix))
+      else:
+        delegates_in_action.append('variable_delegate: {0}VariableDelegate[T] val'.format(prefix))
+    if promise:
+      actionimpl = 'interface val _{0}AsyncAction[T: Any #share]\n'.format(prefix)
+      actionimpl += ' ' * 4 + 'fun apply({0}): Promise[T]\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+      actionimpl += 'primitive _{0}AsyncNoop[T: Any #share]\n'.format(prefix)
+      actionimpl += ' ' * 4 + 'fun apply({0}): Promise[T] =>\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+      actionimpl += ' ' * 8 + 'let p = Promise[T]\n'
+      actionimpl += ' ' * 8 + 'p(ctx0)\n'
+      actionimpl += ' ' * 8 + 'p\n\n'
+    else:
+      actionimpl = 'interface val _{0}Action[T: Any ref]\n'.format(prefix)
+      actionimpl += ' ' * 4 + 'fun apply({0}): T\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+      actionimpl += 'primitive _{0}Noop[T: Any ref]\n'.format(prefix)
+      actionimpl += ' ' * 4 + 'fun apply({0}): T => ctx0\n\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
     for state in states:
       for transition in state.transitions:
         if len(transition.actions) == 0:
@@ -378,41 +424,69 @@
           continue
         actionfun = action
         actionblocks[actionblock] = (action, True)
-        actionimpl += 'primitive {0}[T: Any ref]\n'.format(actionfun)
-        actionimpl += ' ' * 4 + 'fun apply({0}): T =>\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+
+        if promise:
+          actionimpl += 'primitive {0}[T: Any #share]\n'.format(actionfun.replace('_' + prefix, '_' + prefix + 'Async'))
+          actionimpl += ' ' * 4 + 'fun apply({0}): Promise[T] =>\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
+        else:
+          actionimpl += 'primitive {0}[T: Any ref]\n'.format(actionfun)
+          actionimpl += ' ' * 4 + 'fun apply({0}): T =>\n'.format(', '.join(delegates_in_action + ["ctx0: T"] + optional_action_parameter_signatures))
         used_params = _get_used_parameters(transition)
-        actionimpl += _generate_recursive_match(8, used_params, {}, transition)
+        actionimpl += _generate_recursive_match(8, used_params, {}, transition, promise)
         actionimpl += '\n'
 
-    code = 'class {0}StateMachine[T: Any ref]\n'.format(prefix)
-    code += ' ' * 4 + 'var state: I32\n'
+    if promise:
+      code = 'class val {0}AsyncStateMachine[T: Any #share]\n'.format(prefix)
+      code += ' ' * 4 + 'let state: I32\n'
+    else:
+      code = 'class {0}StateMachine[T: Any ref]\n'.format(prefix)
+      code += ' ' * 4 + 'var state: I32\n'
     code += ' ' * 4 + 'let _logger: (Logger[String] | None)\n'
-    delegates = []
+    constructor_arguments = []
     if need_action_delegate:
-      code += ' ' * 4 + 'var action_delegate: {0}ActionDelegate[T] val\n'.format(prefix)
-      delegates.append('actiondelegate: {0}ActionDelegate[T] val'.format(prefix))
+      if promise:
+        code += ' ' * 4 + 'let action_delegate: {0}AsyncActionDelegate[T]\n'.format(prefix)
+        constructor_arguments.append("action_delegate': {0}AsyncActionDelegate[T]".format(prefix))
+      else:
+        code += ' ' * 4 + 'var action_delegate: {0}ActionDelegate[T] val\n'.format(prefix)
+        constructor_arguments.append("action_delegate': {0}ActionDelegate[T] val".format(prefix))
     if need_guard_delegate:
-      code += ' ' * 4 + 'var guard_delegate: {0}GuardDelegate[T] val\n'.format(prefix)
-      delegates.append('guarddelegate: {0}GuardDelegate[T] val'.format(prefix))
+      if promise:
+        code += ' ' * 4 + 'let guard_delegate: {0}AsyncGuardDelegate[T]\n'.format(prefix)
+        constructor_arguments.append("guard_delegate': {0}AsyncGuardDelegate[T]".format(prefix))
+      else:
+        code += ' ' * 4 + 'var guard_delegate: {0}GuardDelegate[T] val\n'.format(prefix)
+        constructor_arguments.append("guard_delegate': {0}GuardDelegate[T] val".format(prefix))
     if need_variable_delegate:
-      code += ' ' * 4 + 'var variable_delegate: {0}VariableDelegate[T] val\n'.format(prefix)
-      delegates.append('variabledelegate: {0}VariableDelegate[T] val'.format(prefix))
+      if promise:
+        code += ' ' * 4 + 'let variable_delegate: {0}AsyncVariableDelegate[T]\n'.format(prefix)
+        constructor_arguments.append("variable_delegate': {0}AsyncVariableDelegate[T]".format(prefix))
+      else:
+        code += ' ' * 4 + 'var variable_delegate: {0}VariableDelegate[T] val\n'.format(prefix)
+        constructor_arguments.append("variable_delegate': {0}VariableDelegate[T] val".format(prefix))
     code += ' ' * 4 + 'let _transition_states: Array[I32] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([str(y) for y in x]) for x in targetstable]))
-    code += ' ' * 4 + 'let _transition_actions: Array[_{1}Action[T] val] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y + '[T]' for y in x]) for x in actionstable]), prefix)
+    if promise:
+      code += ' ' * 4 + 'let _transition_actions: Array[_{1}AsyncAction[T]] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y.replace('_' + prefix, '_' + prefix + 'Async') + '[T]' for y in x]) for x in actionstable]), prefix)
+    else:
+      code += ' ' * 4 + 'let _transition_actions: Array[_{1}Action[T]] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join([y + '[T]' for y in x]) for x in actionstable]), prefix)
     if debug:
       state_strings = ['"N/A"'] + ['"{0}"'.format(str(x.name).replace('"', '\\"').replace('\n', '\\n')) for x in states]
       code += ' ' * 4 + 'let _state_strings: Array[String] = [{0}]\n'.format("; ".join(state_strings))
       code += ' ' * 4 + 'let _action_strings: Array[String] = [\n            {0}\n        ]\n'.format('\n            '.join(['; '.join(['"{0}"'.format(str(y).replace('"', '\\"')) for y in x]) for x in actionstringstable]))
     code += '\n'
-    delegates.append('logger: (Logger[String] | None) = None')
-    code += ' ' * 4 + 'new create({0}) =>\n'.format(', '.join(delegates))
-    code += ' ' * 8 + 'state = {0}()\n'.format(prefix + _to_capitalize(_pony_normalize(states[0].name)))
+    constructor_arguments.append("state': I32 = {0}()".format(prefix + _to_capitalize(_pony_normalize(states[0].name))))
+    constructor_arguments.append('logger: (Logger[String] | None) = None')
+    if promise:
+      code += ' ' * 4 + 'new val create({0}) =>\n'.format(', '.join(constructor_arguments))
+    else:
+      code += ' ' * 4 + 'new create({0}) =>\n'.format(', '.join(constructor_arguments))
+    code += ' ' * 8 + "state = state'\n"
     if need_action_delegate:
-      code += ' ' * 8 + 'action_delegate = actiondelegate\n'
+      code += ' ' * 8 + "action_delegate = action_delegate'\n"
     if need_guard_delegate:
-      code += ' ' * 8 + 'guard_delegate = guarddelegate\n'
+      code += ' ' * 8 + "guard_delegate = guard_delegate'\n"
     if need_variable_delegate:
-      code += ' ' * 8 + 'variable_delegate = variabledelegate\n'
+      code += ' ' * 8 + "variable_delegate = variable_delegate'\n"
     code += ' ' * 8 + '_logger = logger\n'
     code += '\n'
     return actionimpl + code + eventimpl
@@ -511,7 +585,7 @@
       elif isinstance(action, Assignment):
         if isinstance(action.expression, Identifier):
           code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}(ctx{3})\n'.format(idx + 1, varidx, _pony_normalize(str(action.expression)), idx)
-          code += ' ' * indent + 'variable_delegate.on_%s_changed(var%d)\n' % (str(action.target).lower(), varidx)
+          code += ' ' * indent + 'variable_delegate.on_%s_changed(ctx%d, var%d)\n' % (str(action.target).lower(), idx + 1, varidx)
           varidx += 1
         elif isinstance(action.expression, Call):
           call = action.expression
@@ -521,27 +595,97 @@
             if str(operand.name) in keys:
               used_args.append(renamed_args[str(operand.name)])
           code += ' ' * indent + '(let ctx{0}, let var{1}) = action_delegate.{2}({3})\n'.format(idx + 1, varidx, _pony_normalize(str(call.operator)), ', '.join(['ctx%d' % idx] + used_args))
-          code += ' ' * indent + 'variable_delegate.on_%s_changed(var%d)\n' % (str(action.target).lower(), varidx)
+          code += ' ' * indent + 'variable_delegate.on_%s_changed(ctx%d, var%d)\n' % (str(action.target).lower(), idx + 1, varidx)
           varidx += 1
         else:
           code += ' ' * indent + '(let ctx{0}, let {1}) = action_delegate.{2}(ctx{3});\n'.format(idx + 1, str(action.target), _pony_normalize(str(action.expression)), idx)
-          code += ' ' * indent + 'variable_delegate.on_%s_changed(%d)\n' % (str(action.target).lower(), varidx)
+          code += ' ' * indent + 'variable_delegate.on_%s_changed(ctx%d, %d)\n' % (str(action.target).lower(), idx + 1, varidx)
           varidx += 1
       idx += 1
     code += ' ' * indent + 'ctx{0}\n'.format(idx)
     return code
 
-  def _generate_recursive_match(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], transition: Transition) -> str:
+  def _generate_recursive_action_body(indent: int, depth: int, actions: List[Union[Assignment, Call]], renamed_args: Mapping[str, str]) -> str:
+    if len(actions) == 0:
+      return ' ' * indent + 'p{0}(ctx{0})\n'.format(depth)
+    else:
+      code = ''
+      action = actions.pop(0)
+      if isinstance(action, Call):
+        used_args = []
+        keys = renamed_args.keys()
+        for operand in action.operands:
+          if str(operand.name) in keys:
+            used_args.append(renamed_args[str(operand.name)])
+        if depth == 0 and len(actions) == 0:
+          code += ' ' * indent + 'action_delegate.{operator}({args})\n'.format(operator = _pony_normalize(str(action.operator)), args = ', '.join(['ctx%d' % depth] + used_args))
+        else:
+          code += ' ' * indent + 'action_delegate.{operator}({args}).next[None]({{(ctx{nextdepth}: T) =>\n'.format(depth = depth, nextdepth = depth + 1, operator = _pony_normalize(str(action.operator)), args = ', '.join(['ctx%d' % depth] + used_args))
+          code += ' ' * (indent + 4) + 'let p{nextdepth} = p{depth}\n'.format(depth = depth, nextdepth = depth + 1)
+          code += '{nextcode}'.format(nextcode = _generate_recursive_action_body(indent + 4, depth + 1, actions, renamed_args))
+          code += ' ' * (indent + 4) + 'None\n'
+          code += ' ' * indent + '})\n'
+      elif isinstance(action, Assignment):
+        if isinstance(action.expression, Identifier):
+          code += ' ' * indent + 'action_delegate.{operator}({args}).next[None]({{(tup{nextdepth}: (T, {vartype})) =>\n'.format(depth = depth, nextdepth = depth + 1, varidx = depth, varname = _pony_normalize(str(action.target)), vartype = _to_pony_primitive_type(str(action.type)), operator = _pony_normalize(str(action.expression)), args = ', '.join(['ctx%d' % depth] + used_args))
+          code += ' ' * (indent + 4) + 'variable_delegate.on_{varname}_changed(tup{nextdepth}._1, tup{nextdepth}._2)\n'.format(depth = depth, nextdepth = depth + 1, varname = _pony_normalize(str(action.target)))
+          code += ' ' * (indent + 4) + 'let ctx{nextdepth} = tup{nextdepth}._1\n'.format(depth = depth, nextdepth = depth + 1)
+          code += ' ' * (indent + 4) + 'let p{nextdepth} = p{depth}\n'.format(depth = depth, nextdepth = depth + 1)
+          code += '{nextcode}'.format(nextcode = _generate_recursive_action_body(indent + 4, depth + 1, actions, renamed_args))
+          code += ' ' * (indent + 4) + 'None\n'
+          code += ' ' * indent + '})\n'
+        elif isinstance(action.expression, Call):
+          call = action.expression
+          used_args = []
+          keys = renamed_args.keys()
+          for operand in call.operands:
+            if str(operand.name) in keys:
+              used_args.append(renamed_args[str(operand.name)])
+          code += ' ' * indent +  'action_delegate.{operator}({args}).next[None]({{(tup{nextdepth}: (T, {vartype})) =>\n'.format(depth = depth, nextdepth = depth + 1, varidx = depth, varname = _pony_normalize(str(action.target)), vartype = _to_pony_primitive_type(str(action.type)), operator = _pony_normalize(str(call.operator)), args = ', '.join(['ctx%d' % depth] + used_args))
+          code += ' ' * (indent + 4) +  'variable_delegate.on_{varname}_changed(tup{nextdepth}._1, tup{nextdepth}._2)\n'.format(depth = depth, nextdepth = depth + 1, varname = _pony_normalize(str(action.target)))
+          code += ' ' * (indent + 4) +  'let ctx{nextdepth} = tup{nextdepth}._1\n'.format(depth = depth, nextdepth = depth + 1)
+          code += ' ' * (indent + 4) +  'let p{nextdepth} = p{depth}\n'.format(depth = depth, nextdepth = depth + 1)
+          code += '{nextcode}'.format(nextcode = _generate_recursive_action_body(indent + 4, depth + 1, actions, renamed_args))
+          code += ' ' * (indent + 4) +  'None\n'
+          code += ' ' * indent + '})\n'
+        else:
+          code += ' ' * indent + 'action_delegate.{operator}({args}).next[None]({{(tup{nextdepth}: (T, {vartype})) =>\n'.format(depth = depth, nextdepth = depth + 1, varidx = depth, varname = _pony_normalize(str(action.target)), vartype = _to_pony_primitive_type(str(action.type)), operator = _pony_normalize(str(action.expression)), args = ', '.join(['ctx%d' % depth] + used_args))
+          code += ' ' * (indent + 4) + 'variable_delegate.on_{varname}_changed(tup{nextdepth}._1, tup{nextdepth}._2)\n'.format(depth = depth, nextdepth = depth + 1, varidx = depth, varname = _pony_normalize(str(action.target)))
+          code += ' ' * (indent + 4) + 'let ctx{nextdepth} = tup{nextdepth}._1\n'.format(depth = depth, nextdepth = depth + 1)
+          code += ' ' * (indent + 4) + 'let p{nextdepth} = p{depth}\n'.format(depth = depth, nextdepth = depth + 1)
+          code += '{nextcode}'.format(nextcode = _generate_recursive_action_body(indent + 4, depth + 1, actions, renamed_args))
+          code += ' ' * (indent + 4) + 'None\n'
+          code += ' ' * indent + '})\n'
+    return code
+
+  def _generate_recursive_match(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], transition: Transition, promise: bool) -> str:
     code = ''
     if len(used_params) == 0:
-      return _generate_action_body(indent, transition, renamed_args)
+      if promise:
+        if len(transition.actions) == 1 and isinstance(transition.actions[0], Call):
+          return '{body}\n'.format(body = _generate_recursive_action_body(indent, 0, transition.actions, renamed_args))
+        else:
+          code += ' ' * indent + 'let p0 = Promise[T]\n'
+          code += '{body}'.format(body = _generate_recursive_action_body(indent, 0, transition.actions, renamed_args))
+          code += ' ' * indent + 'p0\n'
+          return code
+      else:
+        return _generate_action_body(indent, transition, renamed_args)
     else:
       param = used_params.pop(0)
-      renamed_param = Parameter(Identifier('var%d' % indent), param.type)
-      renamed_args[str(param.name)] = 'var%d' % indent
+      renamed_param = Parameter(Identifier('arg%d' % indent), param.type)
+      renamed_args[str(param.name)] = 'arg%d' % indent
       code += ' ' * indent + 'match {0}\n'.format(param.name)
-      code += ' ' * indent + '| let {0} =>\n{1}\n'.format(_parameter_to_pony_signature(renamed_param), ' ' * (indent + 4) + _generate_recursive_match(indent + 4, used_params, renamed_args, transition).strip())
-      code += ' ' * indent + '| None => ctx0\n'
+      if promise:
+        if len(transition.actions) == 1 and isinstance(transition.actions[0], Call):
+          code += ' ' * indent + '| let {signature} => {body}\n'.format(signature = _parameter_to_pony_signature(renamed_param), body = _generate_recursive_match(indent + 4, used_params, renamed_args, transition, promise).strip())
+        else:
+          code += ' ' * indent + '| let {0} =>\n'.format(_parameter_to_pony_signature(renamed_param))
+          code += ' ' * (indent + 4) + '{0}\n'.format(_generate_recursive_match(indent + 4, used_params, renamed_args, transition, promise).strip())
+        code += ' ' * indent + '| None => let p = Promise[T]; p(ctx0); p\n'
+      else:
+        code += ' ' * indent + '| let {0} =>\n{1}\n'.format(_parameter_to_pony_signature(renamed_param), ' ' * (indent + 4) + _generate_recursive_match(indent + 4, used_params, renamed_args, transition, promise).strip())
+        code += ' ' * indent + '| None => ctx0\n'
       code += ' ' * indent + 'end\n'
       return code
 #+end_src
