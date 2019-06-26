@@ -1,0 +1,594 @@
+#+STARTUP: indent
+* Nim
+** framework
+#+begin_src python :tangle ${BUILDDIR}/nim.py
+  from typing import List, Mapping, Tuple, Union
+  from model import Event, Parameter, State, Transition, Variable
+  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
+  from analyzer import find_call_in_expression
+  from utility import normalize
+
+  delta = 4 # indent
+
+  <<exporter>>
+
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<utility>>
+
+  <<save-states>>
+
+  <<save-delegates>>
+
+  <<save-state-machine>>
+
+  def save(dst: str, variables: List[Variable], states: List[State], args):
+    import os.path
+    (path, filename) = os.path.split(dst)
+    (name, ext) = os.path.splitext(filename)
+    module = name.replace(' ', '-')
+    dst = os.path.join(path, module + ext)
+    prefix = ''.join([x.capitalize() for x in module.replace('_', '-').split('-')])
+    with open(dst, 'w') as f:
+      code1 = _save_states(delta, states, prefix)
+      (code2_1_0, code2_2_0, code2_3_0) = _save_delegates(delta, variables, states, prefix, False)
+      code2 = code2_2_0 + code2_3_0 + code2_1_0
+      (code2_1_1, code2_2_1, code2_3_1) = _save_delegates(delta, variables, states, prefix, True)
+      code2 += code2_1_1
+      (code3_1_0, code3_2_0, code3_3_0) = _save_state_machine(delta, states, args.debug, code2_1_0 != '', code2_2_0 != '', code2_3_0 != '', prefix, False)
+      (code3_1_1, code3_2_1, code3_3_1) = _save_state_machine(delta, states, args.debug, code2_1_0 != '', code2_2_0 != '', code2_3_0 != '', prefix, True)
+      code3 = code3_1_0 + code3_1_1 + code3_2_0 + code3_3_0 + code3_3_1
+      f.write('import asyncdispatch\n\n')
+      f.write('import options\n\n')
+      f.write('type\n')
+      #f.write(code1 + code2)
+      f.write(code1 + code2 + code3)
+      #(code2_1, code2_2, code2_3) = _save_delegates(variables, states, prefix, True)
+      #code2 = code2_1 + code2_2 + code2_3
+      #code3 = _save_state_machine(states, args.debug, code2_1 != '', code2_2 != '', code2_3 != '', prefix, True)
+      #f.write(code2 + code3)
+#+end_src
+*** states
+#+begin_src python :noweb-ref save-states
+  def _save_states(indent: int, states: List[State], prefix: str) -> str:
+    code = ' ' * indent + '{prefix}State* = enum\n'.format(prefix = prefix)
+    code += ' ' * (indent + delta) + ', '.join(['%s = %d' % (_nim_normalize(str(x.name)).upper(), states.index(x) + 1) for x in states])
+    return code + '\n\n'
+#+end_src
+*** delegates
+#+begin_src python :noweb-ref save-delegates
+  <<action-delegate>>
+  <<guard-delegate>>
+  <<variable-delegate>>
+  def _save_delegates(indent: int, variables: List[Variable], states: List[State], prefix: str, asynced: bool) -> str:
+    code1 = _save_action_delegate(indent, variables, states, prefix, asynced)
+    if asynced:
+      code2 = ""
+    else:
+      code2 = _save_guard_delegate(indent, states, prefix)
+    if asynced:
+      code3 = ""
+    else:
+      code3 = _save_variable_delegate(indent, variables, prefix)
+    return (code1, code2, code3)
+#+end_src
+**** action delegate
+#+begin_src python :noweb-ref action-delegate
+  def _save_action_delegate(indent: int, varaibles: List[Variable], states: List[State], prefix: str, asynced: bool) -> str:
+    actions = {}
+    for state in states:
+      for transition in state.transitions:
+        for action in transition.actions:
+          if isinstance(action, Call):
+            actions[str(action.operator)] = (transition.event, action)
+          elif isinstance(action, Assignment):
+            for call in find_call_in_expression(action.expression):
+              actions[str(call.operator)] = (transition.event, call)
+    code = ''
+    for (event, action) in actions.values():
+      if len(str(action.operator)) == 0:
+        continue
+      types = []
+      returntype = ''
+      for operand in action.operands:
+        if isinstance(operand, Identifier):
+          for param in event.parameters:
+            if str(param.name) == str(operand):
+              types.append(_to_nim_primitive_type(str(param.type)))
+              break
+        elif isinstance(operand, Literal):
+          types.append(_to_nim_primitive_type(operand.type))
+      if action.type != None:
+        returntype = _to_nim_primitive_type(_nim_normalize(str(action.type)))
+      if returntype == '':
+        returntype = 'T'
+      else:
+        returntype = '(T, %s)' % returntype
+      if asynced:
+        returntype = 'Future[%s]' % returntype
+      code += ' ' * (indent + delta) + '{funname}*: proc ({args}): {returntype}\n'.format(funname = _nim_normalize(str(action.operator)), args = ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype = returntype)
+    if code != '':
+      if asynced:
+        code = ' ' * indent + prefix + 'AsyncActionDelegate*[T] = ref object of RootObj\n' + code + '\n'
+      else:
+        code = ' ' * indent + prefix + 'ActionDelegate*[T] = ref object of RootObj\n' + code + '\n'
+    return code
+#+end_src
+**** guard delegate
+#+begin_src python :noweb-ref guard-delegate
+  def _save_guard_delegate(indent: int, states: List[State], prefix: str) -> Tuple[List[str], str]:
+    calls = {}
+    for state in states:
+      for transition in state.transitions:
+        guard = transition.guard
+        if guard:
+          for call in find_call_in_expression(guard.expr):
+            calls[str(call)] = (transition.event, call)
+    code = ''
+    for (event, call) in calls.values():
+      types = []
+      for operand in call.operands:
+        if isinstance(operand, Identifier):
+          for param in event.parameters:
+            if str(param.name) == str(operand):
+              types.append(_to_nim_primitive_type(str(param.type)))
+              break
+        elif isinstance(operand, Literal):
+          types.append(_to_nim_primitive_type(operand.type))
+      code += ' ' * (indent + delta) + '{funname}*: proc ({args}): bool\n'.format(funname = _nim_normalize(str(call.operator)), args = ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]))
+    if code != '':
+      code = ' ' * indent + prefix + 'GuardDelegate*[T] = ref object of RootObj\n' + code + '\n'
+    return code
+#+end_src
+**** variable delegate
+#+begin_src python :noweb-ref variable-delegate
+  def _save_variable_delegate(indent: int, variables: List[Variable], prefix: str) -> Tuple[List[str], str]:
+    types = {}
+    code = ''
+    for variable in variables:
+      if variable.type in _nim_builtin_types:
+        type = variable.type
+      else:
+        type = _to_nim_primitive_type(variable.type)
+        types[type] = 0
+      code += ' ' * (indent + delta) + 'on_{varname}_changed*: proc (ctx: T, v: {vartype})\n'.format(varname = _nim_normalize(variable.name), vartype = type)
+    if code != '':
+      code = ' ' * (indent) + prefix + 'VariableDelegate*[T] = ref object of RootObj\n' + code + '\n'
+    return code
+#+end_src
+*** state machine
+#+begin_src python :noweb-ref save-state-machine
+  def _get_event_data(states: List[State]) -> Tuple[Mapping[Event, Mapping[str, Tuple[Transition, str]]], Mapping[str, Tuple[Event, int]]]:
+    events = {}
+    extended_events = {}
+    for state in states:
+      for transition in state.transitions:
+        event = transition.event
+        if event not in events:
+          events[event] = [transition]
+        else:
+          events[event].append(transition)
+    evtidx = 0
+    for (event, transitions) in events.items():
+      guardmappings = {}
+      for transition in transitions:
+        if transition.guard:
+          guardmappings[str(transition.guard)] = (transition, None)
+        else:
+          guardmappings[''] = (transition, None)
+      events[event] = guardmappings
+      guards = [x for x in guardmappings.keys()]
+      if len(guards) == 1 and guards[0] == '':
+        event_tag = normalize(event.name)
+        extended_events[event_tag] = (event, evtidx)
+        evtidx += 1
+        guardmappings[''] = (guardmappings[''][0], event_tag)
+      else:
+        for guardstr in guards:
+          if guardstr == '':
+            continue
+          (transition, _) = guardmappings[guardstr]
+          guard = transition.guard
+          event_tag = normalize(event.name) + '_' + normalize(str(guard))
+          extended_events[event_tag] = (event, evtidx)
+          evtidx += 1
+          guardmappings[guardstr] = (guardmappings[guardstr][0], event_tag)
+        if '' in guards:
+          event_tag = normalize(event.name)
+          extended_events[event_tag] = (event, evtidx)
+          evtidx += 1
+          guardmappings[''] = (guardmappings[''][0], event_tag)
+    return (events, extended_events)
+
+  def _get_target_and_action_data(states: List[State], extended_events: Mapping[str, Tuple[Event, int]], prefix: str) -> Tuple[List[List[str]], List[List[str]], Mapping[str, Tuple[str, bool]], List[List[str]]]:
+    targetstable = [[0] * len(extended_events)]
+    actionstable = [['noop'] * len(extended_events)]
+    stringstable = [['N/A'] * len(extended_events)]
+    actionblocks = {}
+    actionblockid = 0
+    for state in states:
+      targets = []
+      actions = []
+      strings = []
+      for i in range(len(extended_events)):
+        strings.append('N/A')
+      for tag in extended_events.keys():
+        found_target = False
+        found_action = False
+        (_, evtidx) = extended_events[tag]
+        for transition in state.transitions:
+          if transition.guard:
+            event_tag = normalize(str(transition.event.name)) + '_' + normalize(str(transition.guard))
+          else:
+            event_tag = normalize(str(transition.event.name))
+          if tag == event_tag:
+            if transition.target:
+              target = states.index(transition.target) - states.index(state)
+              found_target = True
+            if len(transition.actions) == 0:
+              string = 'N/A'
+              action = 'noop'
+              found_action = True
+            elif len(transition.actions) == 1:
+              if isinstance(transition.actions[0], Call):
+                call = transition.actions[0]
+                if len(call.operands) > 0:
+                  string = '%s(%s)' % (str(call.operator).replace(' ', '-'), ', '.join([str(x) for x in call.operands]))
+                else:
+                  string = str(call.operator).replace(' ', '-')
+                args = ''.join([str(x) for x in transition.actions[0].operands])
+                actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transition.event.parameters]) + '\n' + str(transition.actions[0])
+                if actionblock not in actionblocks:
+                  action = 'actionblock{id}'.format(id = actionblockid)
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
+              elif isinstance(transition.actions[0], Assignment):
+                assignment = transition.actions[0]
+                string = str(assignment)
+                actionblock = str(transition.actions[0])
+                if actionblock not in actionblocks:
+                  action = 'actionblock{id}'.format(id = actionblockid)
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
+              else:
+                string = 'noop'
+                action = 'noop'
+                found_action = True
+            else:
+              tmpstrs = []
+              for act in transition.actions:
+                if isinstance(act, Call):
+                  call = act
+                  if len(call.operands) > 0:
+                    tmpstrs.append('%s(%s)' % (str(call.operator).replace(' ', '-'), ', '.join([str(x) for x in call.operands])))
+                  else:
+                    tmpstrs.append(str(call.operator).replace(' ', '-'))
+                else:
+                  tmpstrs.append(str(act))
+              string = '; '.join(tmpstrs)
+              actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+              if actionblock not in actionblocks:
+                action = 'actionblock{id}'.format(id = actionblockid)
+                actionblocks[actionblock] = (action, False)
+                actionblockid += 1
+              else:
+                (action, _) = actionblocks[actionblock]
+              found_action = True
+        if not found_target:
+          target = 0
+        if not found_action:
+          string = 'N/A'
+          action = 'noop'
+        strings[evtidx] = string
+        targets.append(target)
+        actions.append(action)
+      stringstable.append(strings)
+      targetstable.append(targets)
+      actionstable.append(actions)
+    return (targetstable, actionstable, actionblocks, stringstable)
+
+  def _save_state_machine(indent: int, states: List[State], debug: bool, need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool, prefix: str, asynced: bool) -> Tuple[str, str, str]:
+    asyncprefix = 'Async' if asynced else ''
+    awaitprefix = ' await' if asynced else ''
+    returntype = 'Future[T] {.async.}' if asynced else 'T'
+    (events, extended_events) = _get_event_data(states)
+    extended_eventtags = [x for x in extended_events.keys()]
+    (targetstable, actionstable, actionblocks, actionstringstable) = _get_target_and_action_data(states, extended_events, prefix)
+
+    action_parameter_signatures = _action_parameter_signatures(events)
+    optional_action_parameter_signatures = _optional_action_parameter_signatures(events)
+
+    delegates_in_exec = []
+    if need_action_delegate:
+      delegates_in_exec.append('action_delegate')
+    if need_guard_delegate:
+      delegates_in_exec.append('guard_delegate')
+    if need_variable_delegate:
+      delegates_in_exec.append('variable_delegate')
+
+    action_idx_mapping = {}
+    for (x, row) in enumerate(actionstable):
+      for (y, col) in enumerate(row):
+        if col in action_idx_mapping:
+          action_idx_mapping[col].append(len(row) * x + y)
+        else:
+          action_idx_mapping[col] = [len(row) * x + y]
+
+    eventreturntype = 'Future[({prefix}{asyncprefix}StateMachine[T], T)] {{.async.}}'.format(prefix = prefix, asyncprefix = asyncprefix) if asynced else '({prefix}{asyncprefix}StateMachine[T], T)'.format(prefix = prefix, asyncprefix = asyncprefix)
+    eventimpl = 'proc exec[T]({params}): {returntype} =\n'.format(params = (', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "idx: int", "ctx: T"] + optional_action_parameter_signatures)), returntype = eventreturntype)
+    eventimpl += ' ' * delta + 'let newctx = case idx:\n'
+    casebaseindent = len(' ' * delta + 'let newctx = ')
+    for (key, value) in action_idx_mapping.items():
+      if key != "noop":
+        eventimpl += ' ' * (casebaseindent + delta) + 'of {idxs}:{awaitprefix} {action}[T]({args})\n'.format(idxs = ', '.join([str(x) for x in value]), awaitprefix = awaitprefix, action = key, args = ', '.join(['fsm', 'ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
+      else:
+        continue
+    eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
+    eventimpl += ' ' * delta + 'let newfsm = new({prefix}{asyncprefix}StateMachine[T])\n'.format(prefix = prefix, asyncprefix = asyncprefix)
+    eventimpl += ' ' * delta + 'newfsm.state = fsm.state + transition_states[idx]\n'
+    if need_action_delegate:
+      eventimpl += ' ' * delta + 'newfsm.action_delegate = fsm.action_delegate\n'
+    if need_guard_delegate:
+      eventimpl += ' ' * delta + 'newfsm.guard_delegate = fsm.guard_delegate\n'
+    if need_variable_delegate:
+      eventimpl += ' ' * delta + 'newfsm.variable_delegate = fsm.variable_delegate\n'
+    eventimpl += ' ' * delta + 'result = (newfsm, newctx)\n\n'
+
+    for (event, guardmappings) in events.items():
+      parameter_signatures = [_parameter_to_nim_signature(x) for x in event.parameters]
+      eventimpl += 'proc {funname}*[T]({params}): {returntype} =\n'.format(funname = _nim_normalize(event.name), params = ', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "ctx: T"] + parameter_signatures), returntype = eventreturntype)
+      guards = [x for x in guardmappings.keys()]
+      args = []
+      for p in action_parameter_signatures:
+        if p in parameter_signatures:
+          args.append('some(%s)' % p.split(':')[0])
+        else:
+          args.append('none(%s)' % p.split(':')[1])
+      if len(guards) == 1 and guards[0] == '':
+        (transition, event_tag) = guardmappings['']
+        eventimpl += ' ' * delta + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
+        if debug:
+          eventimpl += ' ' * delta + 'echo("(" & state_strings[fsm.state] & ", {0}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""))
+        eventimpl += ' ' * delta + 'result ={awaitprefix} fsm.exec(args)\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
+      else:
+        firstline = True
+        for guardstr in guards:
+          if guardstr == '':
+            continue
+          (transition, event_tag) = guardmappings[guardstr]
+          guard = transition.guard
+          if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity.operator)), args = ', '.join(['ctx'] + [str(x) for x in guard.expr.entity.operands]))
+          else:
+            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = _nim_normalize(str(guard)))
+          eventimpl += ' ' * (delta * 2) + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
+          if debug:
+            eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {0}[{1}]) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""), guardstr.replace('"', '\\"').replace('\\', '\\\\'))
+          eventimpl += ' ' * (delta * 2) + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
+          firstline = False
+        if '' in guards:
+          eventimpl += ' ' * delta + 'else:\n'
+          event_tag = normalize(event.name)
+          eventimpl += ' ' * (delta * 2) + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
+          if debug:
+            eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {0}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""))
+          eventimpl += ' ' * (delta * 2) + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
+        else:
+          eventimpl += ' ' * delta + 'else:\n'
+          eventimpl += ' ' * (delta * 2) + 'result = ctx\n'
+      eventimpl += '\n'
+
+    actionimpl = ''
+    for state in states:
+      for transition in state.transitions:
+        if len(transition.actions) == 0:
+          continue
+        elif len(transition.actions) == 1:
+          if isinstance(transition.actions[0], Call):
+            args = ''.join([str(x) for x in transition.actions[0].operands])
+            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+          elif isinstance(transition.actions[0], Assignment):
+            actionblock = str(transition.actions[0])
+          else:
+            continue
+        else:
+          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+        (action, generated) = actionblocks[actionblock]
+        if generated:
+          continue
+        actionfun = action
+        actionblocks[actionblock] = (action, True)
+
+        actionimpl += 'proc {funname}[T]({args}): {returntype} =\n'.format(funname = actionfun, args = ', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "ctx0: T"] + optional_action_parameter_signatures), returntype = returntype)
+        used_params = _get_used_parameters(transition)
+        actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, transition, prefix, asynced)
+        actionimpl += '\n'
+
+    typedecl = ' ' * indent + '{prefix}{asyncprefix}StateMachine[T] = ref object of RootObj\n'.format(prefix = prefix, asyncprefix = asyncprefix)
+    typedecl += ' ' * (indent + delta) + 'state*: int\n'
+    constructor_arguments = []
+    if need_action_delegate:
+      typedecl += ' ' * (indent + delta) + 'action_delegate*: {prefix}{asyncprefix}ActionDelegate[T]\n'.format(prefix = prefix, asyncprefix = asyncprefix)
+      constructor_arguments.append("action_delegate: {prefix}{asyncprefix}ActionDelegate[T]".format(prefix = prefix, asyncprefix = asyncprefix))
+    if need_guard_delegate:
+      typedecl += ' ' * (indent + delta) + 'guard_delegate: {prefix}GuardDelegate[T]\n'.format(prefix = prefix)
+      constructor_arguments.append("guard_delegate: {prefix}GuardDelegate[T]".format(prefix = prefix))
+    if need_variable_delegate:
+      typedecl += ' ' * (indent + delta) + 'variable_delegate: {prefix}VariableDelegate[T]\n'.format(prefix = prefix)
+      constructor_arguments.append("variable_delegate: {prefix}VariableDelegate[T]".format(prefix = prefix))
+    typedecl += '\n'
+
+    tabledecl = 'const transition_states: array[{arrayrange}, int] = [\n{padding}{padding}{body}\n{padding}]\n\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = (',\n' + ' ' * (delta * 2)).join([', '.join([str(y) for y in x]) for x in targetstable]), padding = ' ' * (delta))
+    if debug:
+      state_strings = ['"N/A"'] + ['"{0}"'.format(str(x.name).replace('"', '\\"').replace('\n', '\\n')) for x in states]
+      tabledecl += 'const state_strings: array[{arrayrange}, string] = [{body}]\n'.format(arrayrange = '0..%d' % len(states), body = ", ".join(state_strings))
+      tabledecl += 'const action_strings: array[{arrayrange}, string] = [\n            {body}\n        ]\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = ',\n            '.join([', '.join(['"{0}"'.format(str(y).replace('"', '\\"')) for y in x]) for x in actionstringstable]))
+    tabledecl += '\n'
+    code = ''
+    constructor_arguments.append("state: int = ord({prefix}State.{state})".format(prefix = prefix, state = _nim_normalize(states[0].name).upper()))
+    code += 'proc new{prefix}{asyncprefix}StateMachine*[T]({args}): {prefix}{asyncprefix}StateMachine[T] =\n'.format(prefix = prefix, asyncprefix = asyncprefix, args = ', '.join(constructor_arguments))
+    code += ' ' * delta + 'result = new({prefix}{asyncprefix}StateMachine[T])\n'.format(prefix = prefix, asyncprefix = asyncprefix)
+    code += ' ' * delta + 'result.state = state\n'
+    if need_action_delegate:
+      code += ' ' * delta + "result.action_delegate = action_delegate\n"
+    if need_guard_delegate:
+      code += ' ' * delta + "result.guard_delegate = guard_delegate\n"
+    if need_variable_delegate:
+      code += ' ' * delta + "result.variable_delegate = variable_delegate\n"
+    code += '\n'
+    return (typedecl, tabledecl, actionimpl + code + eventimpl)
+#+end_src
+*** utility
+**** framework
+#+begin_src python :noweb-ref utility
+  _nim_builtin_types = ['int', 'int8', 'int16', 'int32', 'int64', 'uint', 'uint8', 'uint16', 'uint32', 'uint64', 'float', 'float32', 'float64', 'true', 'false', 'char', 'string', 'cstring']
+
+  <<normalize>>
+
+  <<to-nim-type>>
+
+  <<signature>>
+
+  <<get-used-parameters>>
+
+  <<lift-arguments>>
+#+end_src
+**** normalize
+#+begin_src python :noweb-ref normalize
+  def _nim_normalize(string: str) -> str:
+    keywords = ["addr", "and", "as", "asm", "bind", "block", "break", "case", "cast", "concept", "const", "continue", "converter", "defer", "discard", "distinct", "div", "do", "elif", "else", "end", "enum", "except", "export", "finally", "for", "from", "func", "if", "import", "in", "include", "interface", "is", "isnot", "iterator", "let", "macro", "method", "mixin", "mod", "nil", "not", "notin", "object", "of", "or", "out", "proc", "ptr", "raise", "ref", "return", "shl", "shr", "static", "template", "try", "tuple", "type", "using", "var", "when", "while", "xor", "yield"]
+    string = string.strip()
+    if string == '-':
+      string = 'minus'
+    elif string == '_':
+      string = 'underline'
+    elif string.startswith('-'):
+      string = string.replace('-', 'minus', 1)
+    result = normalize(string.replace('-', ' ').replace('_', ' ')).lower()
+    if result in keywords:
+      return 'my_' + result
+    else:
+      return result
+#+end_src
+**** to nim type
+#+begin_src python :noweb-ref to-nim-type
+  def _to_nim_primitive_type(origin_type: str) -> str:
+    types = {
+      "bool": "bool",
+      "char": "char",
+      "int": "int",
+      "long": "long",
+      "float": "float",
+      "number": "long",
+      "string": "string",
+    }
+    if origin_type in types:
+      return types[origin_type]
+    else:
+      return origin_type
+#+end_src
+**** signature
+#+begin_src python :noweb-ref signature
+  def _parameter_to_nim_signature(p: Parameter) -> str:
+    if p.type in _nim_builtin_types:
+      return '%s: %s' % (p.name, p.type)
+    else:
+      return '%s: %s' % (p.name, _to_nim_primitive_type(str(p.type)))
+
+  def _action_parameter_signatures(events: List[Event]) -> List[str]:
+    parameters = {}
+    for evt in events:
+      for param in evt.parameters:
+        parameters[_parameter_to_nim_signature(param)] = param
+    return [_parameter_to_nim_signature(x) for x in parameters.values()]
+
+  def _optional_action_parameter_signatures(events: List[Event]) -> List[str]:
+    parameters = {}
+    for evt in events:
+      for param in evt.parameters:
+        parameters[_parameter_to_nim_signature(param)] = param
+    return ['{0}: Option[{1}]'.format(x.split(':')[0], x.split(':')[1].strip()) for x in [_parameter_to_nim_signature(x) for x in parameters.values()]]
+#+end_src
+**** used parameter
+#+begin_src python :noweb-ref get-used-parameters
+  def _get_used_parameters(transition: Transition) -> List[Parameter]:
+    params = {}
+    for action in transition.actions:
+      if isinstance(action, Call):
+        for arg in action.operands:
+          if isinstance(arg, Identifier):
+            for param in transition.event.parameters:
+              if str(arg) == str(param.name):
+                params[str(arg)] = param
+      elif isinstance(action, Assignment):
+        if isinstance(action.expression, Call):
+          for arg in action.expression.operands:
+            if isinstance(arg, Identifier):
+              for param in transition.event.parameters:
+                if str(arg) == str(param.name):
+                  params[str(arg)] = param
+    return [x for x in params.values()]
+#+end_src
+**** lift arguments
+#+begin_src python :noweb-ref lift-arguments
+  def _generate_action_body(indent: int, transition: Transition, renamed_args: Mapping[str, str], asynced: bool) -> str:
+    awaitprefix = ' await' if asynced else ''
+    code = ''
+    idx = 0
+    varidx = 0
+    for action in transition.actions:
+      if isinstance(action, Call):
+        used_args = []
+        keys = renamed_args.keys()
+        for operand in action.operands:
+          if str(operand.name) in keys:
+            used_args.append(renamed_args[str(operand.name)])
+        code += ' ' * indent + 'let ctx{nextidx} ={awaitprefix} fsm.action_delegate.{funname}({args})\n'.format(nextidx = idx + 1, funname = _nim_normalize(str(action.operator)), args = ', '.join(['ctx%d' % idx] + used_args), awaitprefix = awaitprefix)
+      elif isinstance(action, Assignment):
+        if isinstance(action.expression, Identifier):
+          code += ' ' * indent + 'let (ctx{nextidx}, var{varidx}) ={awaitprefix} fsm.action_delegate.{funname}(ctx{idx})\n'.format(nextidx = idx + 1, varidx = varidx, funname = _nim_normalize(str(action.expression)), idx = idx, awaitprefix = awaitprefix)
+          code += ' ' * indent + 'fsm.variable_delegate.on_{varname}_changed(ctx{nextidx}, var{varidx})\n'.format(varname = str(action.target).lower(), nextidx = idx + 1, varidx = varidx)
+          varidx += 1
+        elif isinstance(action.expression, Call):
+          call = action.expression
+          used_args = []
+          keys = renamed_args.keys()
+          for operand in call.operands:
+            if str(operand.name) in keys:
+              used_args.append(renamed_args[str(operand.name)])
+          code += ' ' * indent + 'let (ctx{nextidx}, var{varidx}) ={awaitprefix} fsm.action_delegate.{funname}({args})\n'.format(nextidx = idx + 1, varidx = varidx, funname = _nim_normalize(str(call.operator)), args = ', '.join(['ctx%d' % idx] + used_args), awaitprefix = awaitprefix)
+          code += ' ' * indent + 'fsm.variable_delegate.on_{varname}_changed(ctx{nextidx}, var{varidx})\n'.format(varname = str(action.target).lower(), nextidx = idx + 1, varidx = varidx)
+          varidx += 1
+        else:
+          code += ' ' * indent + 'let (ctx{nextidx}, var{varidx}) ={awaitprefix} fsm.action_delegate.{funname}(ctx{idx});\n'.format(nextidx = idx + 1, varidx = varidx, funname = _nim_normalize(str(action.expression)), idx = idx, awaitprefix = awaitprefix)
+          code += ' ' * indent + 'fsm.variable_delegate.on_{varname}_changed(ctx{nextidx}, var{varidx})\n'.format(varname = str(action.target).lower(), nextidx = idx + 1, varidx = varidx)
+          varidx += 1
+      idx += 1
+    code += ' ' * indent + 'result = ctx{idx}\n'.format(idx = idx)
+    return code
+
+  def _generate_recursive_lifting_arguments(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], transition: Transition, prefix: str, asynced: bool) -> str:
+    code = ''
+    if len(used_params) == 0:
+      return _generate_action_body(indent, transition, renamed_args, asynced)
+    else:
+      param = used_params.pop(0)
+      renamed_param = Parameter(Identifier('arg%d' % indent), param.type)
+      renamed_args[str(param.name)] = 'arg%d' % indent
+      code += ' ' * indent + 'if {argname}.isSome:\n'.format(argname = param.name)
+      code += ' ' * (indent + delta) + 'let {argdef} = {argname}.get()\n'.format(argdef = renamed_args[str(param.name)] , argname = param.name)
+      code += ' ' * (indent + delta) + _generate_recursive_lifting_arguments(indent + delta, used_params, renamed_args, transition, prefix, asynced).strip() + '\n'
+      code += ' ' * indent + 'else:\n'
+      code += ' ' * (indent + delta) + 'result = ctx0\n'
+      return code
+#+end_src
