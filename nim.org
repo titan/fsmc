@@ -207,7 +207,7 @@
     actionstable = [['noop'] * len(extended_events)]
     stringstable = [['N/A'] * len(extended_events)]
     actionblocks = {}
-    actionblockid = 0
+    actionblockid = 1
     for state in states:
       targets = []
       actions = []
@@ -316,23 +316,16 @@
     if need_variable_delegate:
       delegates_in_exec.append('variable_delegate')
 
-    action_idx_mapping = {}
-    for (x, row) in enumerate(actionstable):
-      for (y, col) in enumerate(row):
-        if col in action_idx_mapping:
-          action_idx_mapping[col].append(len(row) * x + y)
-        else:
-          action_idx_mapping[col] = [len(row) * x + y]
-
+    actionnames = set()
+    for row in actionstable:
+      for col in row:
+        actionnames.add(col)
     eventreturntype = 'Future[({prefix}{asyncprefix}StateMachine[T], T)] {{.async.}}'.format(prefix = prefix, asyncprefix = asyncprefix) if asynced else '({prefix}{asyncprefix}StateMachine[T], T)'.format(prefix = prefix, asyncprefix = asyncprefix)
     eventimpl = 'proc exec[T]({params}): {returntype} =\n'.format(params = (', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "idx: int", "ctx: T"] + optional_action_parameter_signatures)), returntype = eventreturntype)
-    eventimpl += ' ' * delta + 'let newctx = case idx:\n'
+    eventimpl += ' ' * delta + 'let newctx = case transition_actions[idx]:\n'
     casebaseindent = len(' ' * delta + 'let newctx = ')
-    for (key, value) in action_idx_mapping.items():
-      if key != "noop":
-        eventimpl += ' ' * (casebaseindent + delta) + 'of {idxs}:{awaitprefix} {action}[T]({args})\n'.format(idxs = ', '.join([str(x) for x in value]), awaitprefix = awaitprefix, action = key, args = ', '.join(['fsm', 'ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
-      else:
-        continue
+    for i in range(1, len(actionnames)):
+      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} {action}[T]({args})\n'.format(idx = i, awaitprefix = awaitprefix, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
     eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
     eventimpl += ' ' * delta + 'let newfsm = new({prefix}{asyncprefix}StateMachine[T])\n'.format(prefix = prefix, asyncprefix = asyncprefix)
     eventimpl += ' ' * delta + 'newfsm.state = fsm.state + transition_states[idx]\n'
@@ -359,7 +352,7 @@
         eventimpl += ' ' * delta + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
         if debug:
           eventimpl += ' ' * delta + 'echo("(" & state_strings[fsm.state] & ", {0}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""))
-        eventimpl += ' ' * delta + 'result ={awaitprefix} fsm.exec(args)\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
+        eventimpl += ' ' * delta + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
       else:
         firstline = True
         for guardstr in guards:
@@ -385,7 +378,7 @@
           eventimpl += ' ' * (delta * 2) + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
         else:
           eventimpl += ' ' * delta + 'else:\n'
-          eventimpl += ' ' * (delta * 2) + 'result = ctx\n'
+          eventimpl += ' ' * (delta * 2) + 'result = (fsm, ctx)\n'
       eventimpl += '\n'
 
     actionimpl = ''
@@ -414,7 +407,7 @@
         actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, transition, prefix, asynced)
         actionimpl += '\n'
 
-    typedecl = ' ' * indent + '{prefix}{asyncprefix}StateMachine[T] = ref object of RootObj\n'.format(prefix = prefix, asyncprefix = asyncprefix)
+    typedecl = ' ' * indent + '{prefix}{asyncprefix}StateMachine*[T] = ref object of RootObj\n'.format(prefix = prefix, asyncprefix = asyncprefix)
     typedecl += ' ' * (indent + delta) + 'state*: int\n'
     constructor_arguments = []
     if need_action_delegate:
@@ -429,6 +422,7 @@
     typedecl += '\n'
 
     tabledecl = 'const transition_states: array[{arrayrange}, int] = [\n{padding}{padding}{body}\n{padding}]\n\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = (',\n' + ' ' * (delta * 2)).join([', '.join([str(y) for y in x]) for x in targetstable]), padding = ' ' * (delta))
+    tabledecl += 'const transition_actions: array[{arrayrange}, int] = [\n{padding}{padding}{body}\n{padding}]\n\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = (',\n' + ' ' * (delta * 2)).join([', '.join(['0' if y == 'noop' else y[len('actionblock'):] for y in x]) for x in actionstable]), padding = ' ' * (delta))
     if debug:
       state_strings = ['"N/A"'] + ['"{0}"'.format(str(x.name).replace('"', '\\"').replace('\n', '\\n')) for x in states]
       tabledecl += 'const state_strings: array[{arrayrange}, string] = [{body}]\n'.format(arrayrange = '0..%d' % len(states), body = ", ".join(state_strings))
@@ -468,6 +462,8 @@
   def _nim_normalize(string: str) -> str:
     keywords = ["addr", "and", "as", "asm", "bind", "block", "break", "case", "cast", "concept", "const", "continue", "converter", "defer", "discard", "distinct", "div", "do", "elif", "else", "end", "enum", "except", "export", "finally", "for", "from", "func", "if", "import", "in", "include", "interface", "is", "isnot", "iterator", "let", "macro", "method", "mixin", "mod", "nil", "not", "notin", "object", "of", "or", "out", "proc", "ptr", "raise", "ref", "return", "shl", "shr", "static", "template", "try", "tuple", "type", "using", "var", "when", "while", "xor", "yield"]
     string = string.strip()
+    if string.startswith('"') and string.endswith('"'):
+      string = string[1:-1]
     if string == '-':
       string = 'minus'
     elif string == '_':
@@ -476,6 +472,8 @@
       string = string.replace('-', 'minus', 1)
     result = normalize(string.replace('-', ' ').replace('_', ' ')).lower()
     if result in keywords:
+      return 'my_' + result
+    elif result in _nim_builtin_types:
       return 'my_' + result
     else:
       return result

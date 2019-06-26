@@ -386,6 +386,8 @@
 #+begin_src python :noweb-ref utility
   def _python_normalize(string: str) -> str:
     keywords = [ "False","None","True","and","as","assert","async","await","break","class","continue","def","del","elif","else","except","finally","for","from","global","if","import","in","is","lambda","nonlocal","not","or","pass","raise","return","try","while","with","yield" ]
+    if string.startswith('"') and string.endswith('"'):
+      string = string[1:-1]
     result = normalize(string.replace('-', ' ').replace('_', ' ')).lower()
     if result in keywords:
       return 'my_' + result
