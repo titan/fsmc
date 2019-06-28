@@ -8,7 +8,7 @@
   from analyzer import find_call_in_expression
   from utility import normalize
 
-  delta = 4 # indent
+  delta = 2 # indent
 
   <<exporter>>
 
@@ -351,7 +351,7 @@
         (transition, event_tag) = guardmappings['']
         eventimpl += ' ' * delta + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
         if debug:
-          eventimpl += ' ' * delta + 'echo("(" & state_strings[fsm.state] & ", {0}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""))
+          eventimpl += ' ' * delta + 'echo("(" & state_strings[fsm.state] & ", {event}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""))
         eventimpl += ' ' * delta + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
       else:
         firstline = True
@@ -366,7 +366,7 @@
             eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = _nim_normalize(str(guard)))
           eventimpl += ' ' * (delta * 2) + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
           if debug:
-            eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {0}[{1}]) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""), guardstr.replace('"', '\\"').replace('\\', '\\\\'))
+            eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {event}[{guard}]) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""), guard = guardstr.replace('\\', '\\\\').replace('"', '\\"'))
           eventimpl += ' ' * (delta * 2) + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
           firstline = False
         if '' in guards:
@@ -374,7 +374,7 @@
           event_tag = normalize(event.name)
           eventimpl += ' ' * (delta * 2) + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
           if debug:
-            eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {0}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(str(event).replace("()", ""))
+            eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {event}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""))
           eventimpl += ' ' * (delta * 2) + 'result ={awaitprefix} fsm.exec({args})\n'.format(awaitprefix = awaitprefix, args = ', '.join(['idx', 'ctx'] + args))
         else:
           eventimpl += ' ' * delta + 'else:\n'
@@ -424,7 +424,7 @@
     tabledecl = 'const transition_states: array[{arrayrange}, int] = [\n{padding}{padding}{body}\n{padding}]\n\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = (',\n' + ' ' * (delta * 2)).join([', '.join([str(y) for y in x]) for x in targetstable]), padding = ' ' * (delta))
     tabledecl += 'const transition_actions: array[{arrayrange}, int] = [\n{padding}{padding}{body}\n{padding}]\n\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = (',\n' + ' ' * (delta * 2)).join([', '.join(['0' if y == 'noop' else y[len('actionblock'):] for y in x]) for x in actionstable]), padding = ' ' * (delta))
     if debug:
-      state_strings = ['"N/A"'] + ['"{0}"'.format(str(x.name).replace('"', '\\"').replace('\n', '\\n')) for x in states]
+      state_strings = ['"N/A"'] + ['"{0}"'.format(str(x.name).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')) for x in states]
       tabledecl += 'const state_strings: array[{arrayrange}, string] = [{body}]\n'.format(arrayrange = '0..%d' % len(states), body = ", ".join(state_strings))
       tabledecl += 'const action_strings: array[{arrayrange}, string] = [\n            {body}\n        ]\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = ',\n            '.join([', '.join(['"{0}"'.format(str(y).replace('"', '\\"')) for y in x]) for x in actionstringstable]))
     tabledecl += '\n'

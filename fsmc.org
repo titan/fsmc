@@ -47,7 +47,9 @@
 
   def main(args):
     import os
+    from os.path import dirname, exists, join, split
     <<extract-arguments>>
+    <<mkdir>>
     (variables, states) = importers[fronn](input)
     exporters[to](output, variables, states, args)
 
@@ -113,4 +115,22 @@
       exit(1)
     else:
       fronn = ext[1:]
+#+end_src
+*** mkdir
+#+begin_src python :noweb-ref mkdir
+  (h0, t0) = split(output)
+  (h1, t1) = split(h0)
+  dirs = []
+  while h0 != h1:
+    dirs.append(t1)
+    h0 = h1
+    (h1, t1) = split(h0)
+  if output.startswith("/") or output.startswith("\\"):
+    target = output[0]
+  else:
+    target = ""
+  for dir in reversed(dirs):
+    target = join(target, dir)
+    if not exists(target):
+      os.mkdir(target)
 #+end_src
