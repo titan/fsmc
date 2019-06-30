@@ -484,8 +484,12 @@
     types = {
       "bool": "bool",
       "char": "char",
+      "short": "int16",
+      "ushort": "uint16",
       "int": "int",
-      "long": "long",
+      "uint": "uint",
+      "long": "int64",
+      "ulong": "uint64",
       "float": "float",
       "number": "long",
       "string": "string",
