@@ -363,7 +363,7 @@
           if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
             eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity.operator)), args = ', '.join(['ctx'] + [str(x) for x in guard.expr.entity.operands]))
           else:
-            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = _nim_normalize(str(guard)))
+            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = str(guard))
           eventimpl += ' ' * (delta * 2) + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
           if debug:
             eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {event}[{guard}]) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""), guard = guardstr.replace('\\', '\\\\').replace('"', '\\"'))
