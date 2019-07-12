@@ -4,10 +4,9 @@
 #+begin_src python :tangle ${BUILDDIR}/excel.py
   from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transition, Variable
-  from semantic import Assignment, Call, Expression, Identifier
-  from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
+  from semantic import Assignment, BoolExpression, Call, Expression, Identifier
+  from analyzer import HeaderSyntaxer, HeaderLexerAdapter, ActionSyntaxer, ActionLexerAdapter
   from lexer import Lexer
-  import re
 
   <<importer>>
 
@@ -36,7 +35,7 @@
 
   <<verify-event>>
 
-  def _parse_events(wx) -> List[Tuple[Event, str]]:
+  def _parse_events(wx) -> List[Tuple[Event, BoolExpression]]:
     uniqevents = {}
     events = []
     headers = wx[1]
@@ -44,60 +43,21 @@
       header = headers[i]
       if not header.value:
         continue
-      guard = None
-      parameters = []
-      result = re.search('(.*)\((.*)\)\[(.*)\]', str(header.value))
-      if result:
-        eventname = result.group(1).strip()
-
-        syntaxer = ParameterSyntaxer()
-        lexer = Lexer(ParameterLexerAdapter(syntaxer))
-        for ch in result.group(2):
-          lexer.feed(ch)
-        lexer.eof()
-        syntaxer.eof()
-        parameters = syntaxer.result()
-
-        syntaxer = GuardSyntaxer()
-        lexer = Lexer(GuardLexerAdapter(syntaxer))
-        for ch in result.group(3):
-          lexer.feed(ch)
-        lexer.eof()
-        syntaxer.eof()
-        guard = syntaxer.result()
+      syntaxer = HeaderSyntaxer()
+      lexer = Lexer(HeaderLexerAdapter(syntaxer))
+      for ch in str(header.value):
+        lexer.feed(ch)
+      lexer.eof()
+      syntaxer.eof()
+      transition = syntaxer.result()
+      event = transition.event
+      if event.name not in uniqevents:
+        for parameter in event.parameters:
+          _verify_parameter(parameter, str(header.value))
+        uniqevents[event.name] = event
       else:
-        result = re.search('(.*)\((.*)\)', str(header.value))
-        if result:
-          eventname = result.group(1).strip()
-          syntaxer = ParameterSyntaxer()
-          lexer = Lexer(ParameterLexerAdapter(syntaxer))
-          for ch in result.group(2):
-            lexer.feed(ch)
-          lexer.eof()
-          syntaxer.eof()
-          parameters = syntaxer.result()
-        else:
-          result = re.search('(.*)\[(.*)\]', str(header.value))
-          if result:
-            eventname = result.group(1).strip()
-            syntaxer = GuardSyntaxer()
-            lexer = Lexer(GuardLexerAdapter(syntaxer))
-            for ch in result.group(2):
-              lexer.feed(ch)
-            lexer.eof()
-            syntaxer.eof()
-            guard = syntaxer.result()
-          else:
-            eventname = str(header.value).strip()
-      if eventname not in uniqevents:
-        event = Event()
-        event.name = eventname
-        for parameter in parameters:
-          event.parameters.append(_verify_parameter(parameter, str(header.value)))
-        uniqevents[eventname] = event
-      else:
-        event = uniqevents[eventname]
-      events.append((_verify_event(event, str(header.value)), guard))
+        event = uniqevents[event.name]
+      events.append((_verify_event(event, str(header.value)), transition.guard))
     return events
 #+end_src
 **** verify-parameter
@@ -124,7 +84,7 @@
 #+begin_src python :noweb-ref parse-states
   <<verify-transition>>
 
-  def _parse_states(wx, headers: List[Tuple[Event, str]]) -> List[State]:
+  def _parse_states(wx, headers: List[Tuple[Event, BoolExpression]]) -> List[State]:
     states = []
     variables = {}
     isheader = True
@@ -133,8 +93,8 @@
         isheader = False
         continue
       state = State()
-      if row[0].value.count('.') != 0:
-        continue
+      #if row[0].value.count('.') != 0:
+      #  continue
       state.name = row[0].value
       for j in range(1, len(row)):
         transition = Transition()

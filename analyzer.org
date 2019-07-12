@@ -6,17 +6,17 @@
 #+begin_src python :tangle ${BUILDDIR}/analyzer.py
   from typing import List, NewType, Union
   from abc import ABC, abstractmethod
-  from parameter_fsm import ActionDelegate as ParameterActionDelegate, GuardDelegate as ParameterGuardDelegate, VariableDelegate as ParameterVariableDelegate, StateMachine as ParameterStateMachine
+  from header_fsm import ActionDelegate as HeaderActionDelegate, GuardDelegate as HeaderGuardDelegate, VariableDelegate as HeaderVariableDelegate, StateMachine as HeaderStateMachine
   from action_fsm import ActionDelegate as ActionActionDelegate, GuardDelegate as ActionGuardDelegate, VariableDelegate as ActionVariableDelegate, StateMachine as ActionStateMachine
   from guard_fsm import ActionDelegate as GuardActionDelegate, GuardDelegate as GuardGuardDelegate, VariableDelegate as GuardVariableDelegate, StateMachine as GuardStateMachine
-  from model import Parameter
+  from model import Parameter, EventName, Event, Transition
   from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, BoolExpression, UnaryBoolExpression, BinaryBoolExpression, CompareExpression, Accessor, Fun, Var, Type, UnionType, ListType, MapType
 
 
   <<utility>>
 
 
-  <<parameter>>
+  <<header>>
 
 
   <<action>>
@@ -25,25 +25,39 @@
   <<guard>>
 #+end_src
 
-** parameter syntaxer
+** header syntaxer
 *** framework
-#+begin_src python :noweb-ref parameter
-  <<parameter-context>>
+#+begin_src python :noweb-ref header
+  <<header-context>>
 
 
-  <<parameter-delegate>>
+  <<header-delegate>>
 
 
-  class ParameterSyntaxer:
+  class HeaderSyntaxer:
 
     def __init__(self):
-      self._fsm = ParameterStateMachine(_ParameterActionDelegate(), None, None)
-      self._ctx = _ParameterContext(self._fsm)
+      self._fsm = HeaderStateMachine(_HeaderActionDelegate(), None, None)
+      self._ctx = _HeaderContext(self._fsm)
 
     def identifier(self, id):
       self._consume_queue()
       self._ctx.input = id
-      self._fsm.identifier(self._ctx)
+      istr = str(id)
+      if istr == "and":
+        self._fsm.my_and(self._ctx)
+      elif istr == "or":
+        self._fsm.my_or(self._ctx)
+      elif istr == "not":
+        self._fsm.my_not(self._ctx)
+      else:
+        self._fsm.identifier(self._ctx)
+      self._consume_queue()
+
+    def literal(self, l):
+      self._consume_queue()
+      self._ctx.input = l
+      self._fsm.literal(self._ctx)
       self._consume_queue()
 
     def delimiter(self, d):
@@ -52,10 +66,16 @@
       dstr = str(d)
       if dstr == ',':
         self._fsm.comma(self._ctx)
+      elif dstr == '.':
+        self._fsm.dot(self._ctx)
       elif dstr == ':':
         self._fsm.colon(self._ctx)
       elif dstr == '|':
         self._fsm.pipe(self._ctx)
+      elif dstr == '(':
+        self._fsm.open_parenthesis(self._ctx)
+      elif dstr == ')':
+        self._fsm.close_parenthesis(self._ctx)
       elif dstr == '[':
         self._fsm.open_bracket(self._ctx)
       elif dstr == ']':
@@ -64,6 +84,18 @@
         self._fsm.open_brace(self._ctx)
       elif dstr == '}':
         self._fsm.close_brace(self._ctx)
+      elif dstr == '==':
+        self._fsm.double_equals(self._ctx)
+      elif dstr == '!=':
+        self._fsm.not_equal_to(self._ctx)
+      elif dstr == '>':
+        self._fsm.greater_than(self._ctx)
+      elif dstr == '>=':
+        self._fsm.greater_than_or_equal_to(self._ctx)
+      elif dstr == '<':
+        self._fsm.less_than(self._ctx)
+      elif dstr == '<=':
+        self._fsm.less_than_or_equal_to(self._ctx)
       self._consume_queue()
 
     def eof(self):
@@ -73,7 +105,7 @@
       self._consume_queue()
 
     def result(self):
-      return self._ctx.parameters
+      return self._ctx.target
 
     def _consume_queue(self):
       while len(self._ctx.queue) > 0:
@@ -94,7 +126,13 @@
 
     def _feed(self, n):
       self._ctx.input = n
-      if isinstance(n, Var):
+      if isinstance(n, Transition):
+        self._fsm.transition(self._ctx)
+      elif isinstance(n, Event):
+        self._fsm.event(self._ctx)
+      elif isinstance(n, EventName):
+        self._fsm.eventname(self._ctx)
+      elif isinstance(n, Var):
         self._fsm.var(self._ctx)
       elif isinstance(n, Type):
         self._fsm.type(self._ctx)
@@ -106,8 +144,23 @@
         self._fsm.map_type(self._ctx)
       elif isinstance(n, Parameter):
         self._fsm.parameter(self._ctx)
+      elif isinstance(n, BoolExpression):
+        self._fsm.bool_expression(self._ctx)
+      elif isinstance(n, CompareExpression):
+        self._fsm.compare_expression(self._ctx)
+      elif isinstance(n, Expression):
+        self._fsm.expression(self._ctx)
+      elif isinstance(n, Call):
+        self._fsm.call(self._ctx)
+      elif isinstance(n, Fun):
+        self._fsm.fun(self._ctx)
+      elif isinstance(n, Accessor):
+        self._fsm.accessor(self._ctx)
       elif isinstance(n, list):
-        self._fsm.parameters(self._ctx)
+        if isinstance(n[0], Parameter):
+          self._fsm.parameters()
+        else:
+          self._fsm.operands(self._ctx)
       elif isinstance(n, str) and n == '$$':
         self._fsm.dollar_dollar(self._ctx)
       elif isinstance(n, Identifier):
@@ -116,10 +169,16 @@
         dstr = str(n)
         if dstr == ',':
           self._fsm.comma(self._ctx)
+        elif dstr == '.':
+          self._fsm.dot(self._ctx)
         elif dstr == ':':
           self._fsm.colon(self._ctx)
         elif dstr == '|':
           self._fsm.pipe(self._ctx)
+        elif dstr == '(':
+          self._fsm.open_parenthesis(self._ctx)
+        elif dstr == ')':
+          self._fsm.close_parenthesis(self._ctx)
         elif dstr == '[':
           self._fsm.open_bracket(self._ctx)
         elif dstr == ']':
@@ -128,13 +187,34 @@
           self._fsm.open_brace(self._ctx)
         elif dstr == '}':
           self._fsm.close_brace(self._ctx)
+        elif dstr == '==':
+          self._fsm.double_equals(self._ctx)
+        elif dstr == '!=':
+          self._fsm.not_equal_to(self._ctx)
+        elif dstr == '>':
+          self._fsm.greater_than(self._ctx)
+        elif dstr == '>=':
+          self._fsm.greater_than_or_equal_to(self._ctx)
+        elif dstr == '<':
+          self._fsm.less_than(self._ctx)
+        elif dstr == '<=':
+          self._fsm.less_than_or_equal_to(self._ctx)
 
 
-  <<parameter-adapter>>
+  <<header-adapter>>
 #+end_src
 *** bnf
-#+begin_src text :tangle ${BUILDDIR}/parameter_fsm.bnf
-  target = parameters $$
+#+begin_src text :tangle ${BUILDDIR}/header_fsm.bnf
+  target = transition $$
+
+  transition = event
+             | event '[' bool-expression ']'
+
+  event = eventname
+        | eventname '(' parameters ')'
+
+  eventname = eventname identifier
+            | identifier
 
   parameters = parameters ',' parameter
              | parameter
@@ -164,36 +244,220 @@
   list-type = '[' type ']'
 
   map-type = '{' type ':' type '}'
+
+  bool-expression = bool-expression "and" bool-expression
+                  | bool-expression "or" bool-expression
+                  | "not" bool-expression
+                  | compare-expression
+                  | '(' bool-expression ')'
+                  | expression
+
+  compare-expression = expression "==" expression
+                     | expression "!=" expression
+                     | expression ">"  expression
+                     | expression ">=" expression
+                     | expression "<"  expression
+                     | expression "<=" expression
+
+  expression = call
+             | accessor
+             | literal
+             | identifier
+
+  call = fun '(' operands ')'
+       | fun '(' ')'
+
+  fun = fun identifier
+      | fun literal
+      | identifier
+
+  operands = expression
+           | operands ',' expression
+
+  accessor = accessor '.' identifier
+           | identifier '.' identifier
 #+end_src
 *** context
-#+begin_src python :noweb-ref parameter-context
-  class _ParameterContext:
-    parameters: List[Parameter]
-
+#+begin_src python :noweb-ref header-context
+  class _HeaderContext:
     def __init__(self, fsm = None):
       self.fsm = fsm
       self.queue = []
       self.delay_queue = []
       self.state_stack = []
       self.value_stack = []
-      self.parameters = []
+      self.target = None
       self.input = None
 #+end_src
 *** delegate
-#+begin_src python :noweb-ref parameter-delegate
-  class _ParameterActionDelegate(ParameterActionDelegate):
+#+begin_src python :noweb-ref header-delegate
+  class _HeaderActionDelegate(HeaderActionDelegate):
 
     def shift(self, ctx):
       ctx.state_stack.append(ctx.fsm.state)
       ctx.value_stack.append(ctx.input)
 
     def syntax_error(self, ctx):
-      print("syntax error in parameter syntaxer")
+      print("syntax error in header syntaxer")
       print("current state: %d" % ctx.fsm.state)
       print("stack: %s" % ctx.value_stack)
       print("state stack: %s" % ctx.state_stack)
       print("input: %s" % ctx.input)
       exit(1)
+
+    def reduce_1_to_eventname(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      name = ctx.value_stack.pop()
+      eventname = EventName()
+      eventname.data.append(name)
+      ctx.queue.append(eventname)
+
+    def reduce_2_to_target(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      transition = ctx.value_stack.pop()
+      ctx.target = transition
+
+    def enqueue(self, ctx):
+      ctx.delay_queue.append(ctx.input)
+
+    def reduce_1_to_transition(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      event = ctx.value_stack.pop()
+      transition = Transition()
+      transition.event = event
+      ctx.queue.append(transition)
+
+    def reduce_1_to_bool_expression(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.value_stack.pop()
+      ctx.queue.append(BoolExpression(expr))
+
+    def reduce_1_to_expression(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.value_stack.pop()
+      ctx.queue.append(Expression(expr))
+
+    def reduce_4_to_transition(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      guard = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      event = ctx.value_stack.pop()
+      transition = Transition()
+      transition.event = event
+      transition.guard = guard
+      ctx.queue.append(transition)
+
+    def reduce_3_to_bool_expression(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr2 = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      op = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr1 = ctx.value_stack.pop()
+      ctx.queue.append(BinaryBoolExpression(expr1, op, expr2))
+
+    def reduce_2_to_bool_expression(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      op = ctx.value_stack.pop()
+      ctx.queue.append(UnaryBoolExpression(op, expr))
+
+    def reduce_3_to_compare_expression(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr2 = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      op = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr1 = ctx.value_stack.pop()
+      ctx.queue.append(CompareExpression(expr1, op, expr2))
+
+    def reduce_2_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.value_stack.pop()
+      fun.names.append(id)
+      ctx.queue.append(fun)
+
+    def reduce_3_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.value_stack.pop()
+      ctx.queue.append(Call(fun, []))
+
+    def reduce_1_to_operands(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.value_stack.pop()
+      ctx.queue.append([expr.entity])
+
+    def reduce_4_to_call(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      operands = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.value_stack.pop()
+      ctx.queue.append(Call(fun, operands))
+
+    def reduce_3_to_operands(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      expr = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      operands = ctx.value_stack.pop()
+      operands.append(expr.entity)
+      ctx.queue.append(operands)
+
+    def reduce_1_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.value_stack.pop()
+      ctx.queue.append(Fun(id))
+
+    def reduce_3_to_accessor(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      accessor_or_id = ctx.value_stack.pop()
+      if isinstance(accessor_or_id, Identifier):
+        ctx.queue.append(Accessor([accessor_or_id, id]))
+      else:
+        accessor_or_id.accessors.append(id)
+        ctx.queue.append(accessor_or_id)
+
+    def reduce_1_to_event(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      eventname = ctx.value_stack.pop()
+      event = Event()
+      event.name = str(eventname)
+      ctx.queue.append(event)
+
+    def reduce_2_to_eventname(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      name = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      eventname = ctx.value_stack.pop()
+      eventname.data.append(name)
+      ctx.queue.append(eventname)
+
+    def reduce_1_to_var(self, ctx):
+      var = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.queue.append(Var(var))
 
     def reduce_1_to_parameters(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
@@ -201,20 +465,19 @@
       parameters = [ parameter ]
       ctx.queue.append(parameters)
 
-    def reduce_1_to_var(self, ctx):
-      var = ctx.value_stack.pop()
-      ctx.fsm.state = ctx.state_stack.pop()
-      ctx.queue.append(Var(var))
-
-    def reduce_2_to_target(self, ctx):
+    def reduce_4_to_event(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
       ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
       parameters = ctx.value_stack.pop()
-      if isinstance(parameters, list):
-        ctx.parameters = parameters
-      else:
-        ctx.parameters.append(parameters)
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      eventname = ctx.value_stack.pop()
+      event = Event()
+      event.name = str(eventname)
+      event.parameters = parameters
+      ctx.queue.append(event)
 
     def reduce_3_to_parameters(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
@@ -235,9 +498,6 @@
       var = ctx.value_stack.pop()
       parameter = Parameter(var, type)
       ctx.queue.append(parameter)
-
-    def enqueue(self, ctx):
-      ctx.delay_queue.append(ctx.input)
 
     def reduce_1_to_type(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
@@ -287,19 +547,21 @@
       ctx.queue.append(MapType(keytype, valtype))
 #+end_src
 *** lex adapter
-#+begin_src python :noweb-ref parameter-adapter
-  class ParameterLexerAdapter:
+#+begin_src python :noweb-ref header-adapter
+  class HeaderLexerAdapter:
 
-    def __init__(self, syntaxer: ParameterSyntaxer):
+    def __init__(self, syntaxer: HeaderSyntaxer):
       self._syntaxer = syntaxer
 
     def on_call(self, token):
       if isinstance(token, Identifier):
         self._syntaxer.identifier(token)
+      elif isinstance(token, Literal):
+        self._syntaxer.literal(token)
       elif isinstance(token, Delimiter):
         self._syntaxer.delimiter(token)
       else:
-        print('Unknown token in parameter lexer adapter: %s' % (repr(token)))
+        print('Unknown token in header lexer adapter: %s' % (repr(token)))
         exit(1)
 #+end_src
 
@@ -383,39 +645,39 @@
 #+end_src
 *** bnf
 #+begin_src text
-  guard = bool-expression
+  guard = bool-expression $$
 
-  bool-expression = bool-expression and bool-expression
-                  | bool-expression or bool-expression
-                  | not boo-expression
+  bool-expression = bool-expression "and" bool-expression
+                  | bool-expression "or" bool-expression
+                  | "not" bool-expression
                   | compare-expression
-                  | ( bool-expression )
+                  | '(' bool-expression ')'
                   | expression
 
-  compare-expression = expression == expression
-                     | expression != expression
-                     | expression >  expression
-                     | expression >= expression
-                     | expression <  expression
-                     | expression <= expression
+  compare-expression = expression "==" expression
+                     | expression "!=" expression
+                     | expression ">"  expression
+                     | expression ">=" expression
+                     | expression "<"  expression
+                     | expression "<=" expression
 
   expression = call
              | accessor
              | literal
              | identifier
 
-  call = fun ( operands )
-       | fun ( )
+  call = fun '(' operands ')'
+       | fun '(' ')'
 
   fun = fun identifier
       | fun literal
       | identifier
 
   operands = expression
-           | operands , expression
+           | operands ',' expression
 
-  accessor = accessor . identifier
-           | identifier . identifier
+  accessor = accessor '.' identifier
+           | identifier '.' identifier
 #+end_src
 
 *** fsm defination

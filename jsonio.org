@@ -5,7 +5,7 @@
   from typing import List, Mapping, Tuple
   from model import Event, Parameter, State, Transition, Variable
   from semantic import Assignment, Call, Expression, Identifier
-  from analyzer import ParameterSyntaxer, ParameterLexerAdapter, ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
+  from analyzer import ActionSyntaxer, ActionLexerAdapter, GuardSyntaxer, GuardLexerAdapter
   from lexer import Lexer
   import json
 

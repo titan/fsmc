@@ -157,7 +157,7 @@
         eventimpl += ' ' * 4 + 'self._transition_actions[fromstate][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
         eventimpl += ' ' * 4 + 'self.state += _transition_states[fromstate][self.%s]\n' % event_tag
         if debug:
-          eventimpl += ' ' * 4 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event), extended_events[event_tag][1])
+          eventimpl += ' ' * 4 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event).replace('"', '\\"'), extended_events[event_tag][1])
       else:
         firstline = True
         for guardstr in guards:
@@ -176,7 +176,7 @@
           eventimpl += ' ' * 6 + 'self._transition_actions[fromstate][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
           eventimpl += ' ' * 6 + 'self.state += _transition_states[fromstate][self.%s]\n' % event_tag
           if debug:
-            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s[%s]", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event), guardstr.replace('"', '\\"'), extended_events[event_tag][1])
+            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s[%s]", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event).replace('"', '\\"'), guardstr.replace('"', '\\"'), extended_events[event_tag][1])
           firstline = False
         if '' in guards:
           event_tag = normalize(event.name)
@@ -187,7 +187,7 @@
           eventimpl += ' ' * 6 + 'self._transition_actions[fromstate][self.%s](%s)\n' % (event_tag, ', '.join(['ctx'] + [str(x.name).lower() for x in event.parameters]))
           eventimpl += ' ' * 6 + 'self.state += _transition_states[fromstate][self.%s]\n' % event_tag
           if debug:
-            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event), extended_events[event_tag][1])
+            eventimpl += ' ' * 6 + 'print("(%%s, %%s) => (%%s, %%s)" %% (_state_strings[fromstate], "%s", _state_strings[self.state], _action_strings[fromstate][%d]))\n' % (str(event).replace('"', '\\"'), extended_events[event_tag][1])
       eventimpl += '\n'
 
     eventdef = ''
