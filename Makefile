@@ -35,7 +35,7 @@ $(SYMBNFFSM): %.py: %.txt
 	fsmc.py $(addprefix $(BUILDDIR)/, $(notdir $<)) -t python
 
 $(subst .py,.txt,$(SYMBNFFSM)): %.txt: %.bnf
-	bnf2fsm.py $(addprefix $(BUILDDIR)/, $(notdir $<)) $(addprefix $(BUILDDIR)/, $(notdir $@))
+	bnf2fsm.py $(addprefix $(BUILDDIR)/, $(notdir $<)) $(addprefix $(BUILDDIR)/, $(notdir $@)) --fsmc
 
 $(subst .py,.bnf,$(SYMBNFFSM)): analyzer.org
 	sed 's/$$$\{BUILDDIR}/$(ESCAPED_BUILDDIR)/g' $< | org-tangle -
