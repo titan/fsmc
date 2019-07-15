@@ -114,7 +114,12 @@
       for transition in state.transitions:
         guard = transition.guard
         if guard:
-          for call in find_call_in_expression(guard.expr):
+          if isinstance(guard.expr, BoolExpression):
+            continue
+          if isinstance(guard.expr, CompareExpression):
+            continue
+          if isinstance(guard.expr, Expression) and isinstance(guard.expr.entity, Call):
+            call = guard.expr.entity
             calls[str(call)] = (transition.event, call)
     code = ''
     for (event, call) in calls.values():
