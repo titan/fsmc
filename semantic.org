@@ -25,6 +25,9 @@
   <<assignment>>
 
 
+  <<action>>
+
+
   <<fun>>
 
 
@@ -95,6 +98,20 @@
 
     def __repr__(self):
       return 'Literal(%s: %s)' % (self.name, self.type)
+#+end_src
+** Action
+#+begin_src python :noweb-ref action
+  class Action():
+    value: Union[Call, Assignment]
+
+    def __init__(self, value: Union[Call, Assignment] = None):
+      self.value = value
+
+    def __str__(self):
+      return str(self.value)
+
+    def __repr__(self):
+      return 'Action(%s)' % (repr(self.value))
 #+end_src
 ** Call
 #+begin_src python :noweb-ref call

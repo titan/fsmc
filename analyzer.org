@@ -10,7 +10,7 @@
   from action_fsm import ActionDelegate as ActionActionDelegate, GuardDelegate as ActionGuardDelegate, VariableDelegate as ActionVariableDelegate, StateMachine as ActionStateMachine
   from guard_fsm import ActionDelegate as GuardActionDelegate, GuardDelegate as GuardGuardDelegate, VariableDelegate as GuardVariableDelegate, StateMachine as GuardStateMachine
   from model import Parameter, EventName, Event, Transition
-  from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, BoolExpression, UnaryBoolExpression, BinaryBoolExpression, CompareExpression, Accessor, Fun, Var, Type, UnionType, ListType, MapType
+  from semantic import Expression, Assignment, Identifier, Literal, Delimiter, Call, BoolExpression, UnaryBoolExpression, BinaryBoolExpression, CompareExpression, Accessor, Fun, Var, Type, UnionType, ListType, MapType, Action
 
 
   <<utility>>
@@ -1230,25 +1230,25 @@
     def identifier(self, id):
       self._consume_queue()
       self._ctx.input = id
-      self._fsm.identifier(self._ctx, id)
+      self._fsm.identifier(self._ctx)
       self._consume_queue()
 
     def literal(self, l):
       self._consume_queue()
       self._ctx.input = l
-      self._fsm.literal(self._ctx, l)
+      self._fsm.literal(self._ctx)
       self._consume_queue()
 
     def delimiter(self, d):
       self._consume_queue()
       self._ctx.input = d
-      self._fsm.delimiter(self._ctx, d)
+      self._fsm.literal_token(self._ctx, str(d))
       self._consume_queue()
 
     def eof(self):
       self._consume_queue()
-      self._ctx.input = 'eof'
-      self._fsm.eof(self._ctx, 0)
+      self._ctx.input = '$$'
+      self._fsm.dollar_dollar(self._ctx)
       self._consume_queue()
 
     def result(self):
@@ -1272,36 +1272,43 @@
         self._feed(d)
 
     def _feed(self, n):
-      if isinstance(n, Assignment):
-        self._fsm.assignment(self._ctx, n)
+      self._ctx.input = n
+      if isinstance(n, Action):
+        self._fsm.action(self._ctx)
+      elif isinstance(n, Assignment):
+        self._fsm.assignment(self._ctx)
       elif isinstance(n, Call):
-        self._fsm.call(self._ctx, n)
+        self._fsm.call(self._ctx)
       elif isinstance(n, Fun):
-        self._fsm.fun(self._ctx, n)
+        self._fsm.fun(self._ctx)
       elif isinstance(n, Identifier):
-        self._fsm.identifier(self._ctx, n)
+        self._fsm.identifier(self._ctx)
       elif isinstance(n, Literal):
-        self._fsm.literal(self._ctx, n)
+        self._fsm.literal(self._ctx)
       elif isinstance(n, Delimiter):
-        self._fsm.delimiter(self._ctx, n)
+        self._fsm.literal_token(self._ctx, str(n))
       elif isinstance(n, list):
-        self._fsm.operands(self._ctx, n)
+        self._fsm.operands(self._ctx)
       elif isinstance(n, int):
-        self._fsm.eof(self._ctx, n)
+        self._fsm.eof(self._ctx)
+      elif isinstance(n, str) and n == '$$':
+        self._fsm.dollar_dollar(self._ctx)
 
 
   <<action-adapter>>
 #+end_src
 *** bnf
-#+begin_src text
+#+begin_src text :tangle ${BUILDDIR}/action_fsm.bnf
+  target = action $$
+
   action = assignment
          | call
 
-  assignment = identifier : identifier = call
-             | identifier = call
+  assignment = identifier ':' identifier '=' call
+             | identifier '=' call
 
-  call = fun ( operands )
-       | fun ( )
+  call = fun '(' operands ')'
+       | fun '(' ')'
        | fun
 
   fun = fun identifier
@@ -1310,104 +1317,9 @@
 
   operands = literal
            | identifier
-           | operands , literal
-           | operands , identifier
+           | operands ',' literal
+           | operands ',' identifier
 #+end_src
-*** fsm defination
-#+begin_src text :tangle ${BUILDDIR}/action_fsm.txt
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  | state\event                                    | assignment(a: assignment) | call(c: call)             | fun(f: fun)                | operands(o: [identifier | literal]) | identifier(i: identifier)                      | literal(l: literal)  | delimiter(d: delimiter)[d.name == ':']         | delimiter(d: delimiter)[d.name == '('] | delimiter(d: delimiter)[d.name == ')'] | delimiter(d: delimiter)[d.name == '=']         | delimiter(d: delimiter)[d.name == ','] | eof(e: int)      |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  | action -> · assignment $$                      |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | action -> · call $$                            |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | assignment -> · identifier : identifier = call |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | assignment -> · identifier = call              |                           |                           | shift(f)                   |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun ( operands )                     |                           |                           | ----                       |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun ( )                              |                           |                           | call -> fun · ( operands ) |                                     | shift(i)                                       |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun                                  |                           |                           | call -> fun · ( )          | syntax error                        | ----                                           | syntax error         | syntax error                                   | syntax error                           | syntax error                           | syntax error                                   | syntax error                           | syntax error     |
-  | fun -> · fun identifier                        | shift(a)                  | shift(c)                  | call -> fun ·              | quit                                | assignment -> identifier · : identifier = call | quit                 | quit                                           | quit                                   | quit                                   | quit                                           | quit                                   | quit             |
-  | fun -> · fun literal                           | ----                      | ----                      | fun -> fun · identifier    | ----                                | assignment -> identifier · = call              | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | ----                                   | ----             |
-  | fun -> · identifier                            | action -> assignment · $$ | action -> call · $$       | fun -> fun · literal       |                                     | fun -> identifier ·                            |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        | syntax error                                   | syntax error         | syntax error                                   | syntax error                           | syntax error                           | syntax error                                   | syntax error                           | shift(e)         |
-  |                                                | quit                      | quit                      | quit                       | quit                                | quit                                           | quit                 | quit                                           | quit                                   | quit                                   | quit                                           | quit                                   | reduce to action |
-  |                                                | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | ----                                   | ----             |
-  | action -> assignment · $$                      |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        | syntax error                                   | syntax error         | syntax error                                   | syntax error                           | syntax error                           | syntax error                                   | syntax error                           | shift(e)         |
-  |                                                | quit                      | quit                      | quit                       | quit                                | quit                                           | quit                 | quit                                           | quit                                   | quit                                   | quit                                           | quit                                   | reduce to action |
-  |                                                | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | ----                                   | ----             |
-  | action -> call · $$                            |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | shift(d)                                       |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | ----                                           |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | assignment -> identifier = · call              |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | call -> · fun ( operands )                     |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | call -> · fun ( )                              |                                        |                  |
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        | reduce 1 to fun                                | reduce 1 to fun      |                                                | reduce 1 to fun                        | syntax error                           | call -> · fun                                  | syntax error                           | reduce 1 to fun  |
-  | assignment -> identifier · : identifier = call | quit                      | quit                      | quit                       | quit                                | enqueue(i)                                     | enqueue(l)           | shift(d)                                       | enqueue(d)                             | quit                                   | fun -> · fun identifier                        | quit                                   | enqueue(e)       |
-  | assignment -> identifier · = call              | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | fun -> · fun literal                           | ----                                   | ----             |
-  | fun -> identifier ·                            |                           |                           |                            |                                     |                                                |                      | assignment -> identifier : · identifier = call |                                        |                                        | fun -> · identifier                            |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        |                                                | syntax error         | syntax error                                   | syntax error                           | syntax error                           |                                                | syntax error                           | syntax error     |
-  |                                                | quit                      | quit                      | quit                       | quit                                | shift(i)                                       | quit                 | quit                                           | quit                                   | quit                                   |                                                | quit                                   | quit             |
-  |                                                | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   |                                                | ----                                   | ----             |
-  | assignment -> identifier : · identifier = call |                           |                           |                            |                                     | assignment -> identifier : identifier · = call |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | shift(d)                                       |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | ----                                           |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | assignment -> identifier : identifier = · call |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | call -> · fun ( operands )                     |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | call -> · fun ( )                              |                                        |                  |
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        |                                                | syntax error         | syntax error                                   | syntax error                           | syntax error                           | call -> · fun                                  | syntax error                           | syntax error     |
-  |                                                | quit                      | quit                      | quit                       | quit                                |                                                | quit                 | quit                                           | quit                                   | quit                                   | fun -> · fun identifier                        | quit                                   | quit             |
-  |                                                | ----                      | ----                      | ----                       | ----                                |                                                | ----                 | ----                                           | ----                                   | ----                                   | fun -> · fun literal                           | ----                                   | ----             |
-  | assignment -> identifier : identifier · = call |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        | fun -> · identifier                            |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  | assignment -> identifier : identifier = · call |                           |                           | shift(f)                   |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun ( operands )                     |                           |                           | ----                       |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun ( )                              |                           |                           | call -> fun · ( operands ) |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun                                  | syntax error              | shift(c)                  | call -> fun · ( )          | syntax error                        | shift(i)                                       | syntax error         | syntax error                                   | syntax error                           | syntax error                           | syntax error                                   | syntax error                           | syntax error     |
-  | fun -> · fun identifier                        | quit                      | reduce 5 to assignment(c) | call -> fun ·              | quit                                | reduce 1 to fun                                | quit                 | quit                                           | quit                                   | quit                                   | quit                                           | quit                                   | quit             |
-  | fun -> · fun literal                           | ----                      | ----                      | fun -> fun · identifier    | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | ----                                   | ----             |
-  | fun -> · identifier                            |                           |                           | fun -> fun · literal       |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  | assignment -> identifier = · call              |                           |                           | shift(f)                   |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun ( operands )                     |                           |                           | ----                       |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun ( )                              |                           |                           | call -> fun · ( operands ) |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> · fun                                  | syntax error              | shift(c)                  | call -> fun · ( )          | syntax error                        | shift(i)                                       | syntax error         | syntax error                                   | syntax error                           | syntax error                           | syntax error                                   | syntax error                           | syntax error     |
-  | fun -> · fun identifier                        | quit                      | reduce 3 to assignment(c) | call -> fun ·              | quit                                | reduce 1 to fun                                | quit                 | quit                                           | quit                                   | quit                                   | quit                                           | quit                                   | quit             |
-  | fun -> · fun literal                           | ----                      | ----                      | fun -> fun · identifier    | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | ----                                   | ----             |
-  | fun -> · identifier                            |                           |                           | fun -> fun · literal       |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                | shift(d)                               |                                        |                                                |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                | ----                                   |                                        |                                                |                                        |                  |
-  |                                                |                           |                           |                            |                                     |                                                |                      |                                                | call -> fun ( · operands )             |                                        |                                                |                                        |                  |
-  | call -> fun · ( operands )                     |                           |                           |                            |                                     |                                                |                      |                                                | call -> fun ( · )                      |                                        |                                                |                                        |                  |
-  | call -> fun · ( )                              | syntax error              | syntax error              | syntax error               | syntax error                        | shift(i)                                       | shift(l)             | syntax error                                   | operands -> · operands , literal       | syntax error                           | syntax error                                   | syntax error                           | reduce 1 to call |
-  | call -> fun ·                                  | quit                      | quit                      | quit                       | quit                                | reduce 2 to fun                                | reduce 2 to fun      | quit                                           | operands -> · operands , identifier    | quit                                   | quit                                           | quit                                   | enqueue(e)       |
-  | fun -> fun · identifier                        | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | operands -> · literal                  | ----                                   | ----                                           | ----                                   | ----             |
-  | fun -> fun · literal                           |                           |                           |                            |                                     |                                                |                      |                                                | operands -> · identifier               |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  | call -> fun ( · operands )                     |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | call -> fun ( · )                              |                           |                           |                            | shift(o)                            |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  | operands -> · operands , literal               | syntax error              | syntax error              | syntax error               | ----                                | shift(i)                                       | shift(l)             | syntax error                                   | syntax error                           | shift(d)                               | syntax error                                   | shift(d)                               | syntax error     |
-  | operands -> · operands , identifier            | quit                      | quit                      | quit                       | call -> fun ( operands · )          | reduce 1 to operands                           | reduce 1 to operands | quit                                           | quit                                   | reduce 3 to call                       | quit                                           | ----                                   | quit             |
-  | operands -> · literal                          | ----                      | ----                      | ----                       | operands -> operands · , literal    | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | operands -> operands , · literal       | ----             |
-  | operands -> · identifier                       |                           |                           |                            | operands -> operands · , identifier |                                                |                      |                                                |                                        |                                        |                                                | operands -> operands , · identifier    |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        | syntax error                                   | syntax error         | syntax error                                   | syntax error                           | shift(d)                               | syntax error                                   | shift(d)                               | syntax error     |
-  | call -> fun ( operands · )                     | quit                      | quit                      | quit                       | quit                                | quit                                           | quit                 | quit                                           | quit                                   | reduce 4 to call                       | quit                                           | ----                                   | quit             |
-  | operands -> operands · , literal               | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | operands -> operands , · literal       | ----             |
-  | operands -> operands · , identifier            |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                | operands -> operands , · identifier    |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-  |                                                | syntax error              | syntax error              | syntax error               | syntax error                        | shift(i)                                       | shift(l)             | syntax error                                   | syntax error                           | syntax error                           | syntax error                                   | syntax error                           | syntax error     |
-  |                                                | quit                      | quit                      | quit                       | quit                                | reduce 2 to operands                           | reduce 2 to operands | quit                                           | quit                                   | quit                                   | quit                                           | quit                                   | quit             |
-  | operands -> operands , · literal               | ----                      | ----                      | ----                       | ----                                | ----                                           | ----                 | ----                                           | ----                                   | ----                                   | ----                                           | ----                                   | ----             |
-  | operands -> operands , · identifier            |                           |                           |                            |                                     |                                                |                      |                                                |                                        |                                        |                                                |                                        |                  |
-  +------------------------------------------------+---------------------------+---------------------------+----------------------------+-------------------------------------+------------------------------------------------+----------------------+------------------------------------------------+----------------------------------------+----------------------------------------+------------------------------------------------+----------------------------------------+------------------+
-#+end_src
-
 *** context
 #+begin_src python :noweb-ref action-context
   class _ActionContext:
@@ -1418,7 +1330,7 @@
       self.queue = []
       self.delay_queue = []
       self.state_stack = []
-      self.stack = []
+      self.value_stack = []
       self.action = None
       self.input = None
 #+end_src
@@ -1426,100 +1338,106 @@
 #+begin_src python :noweb-ref action-delegate
   class _ActionActionDelegate(ActionActionDelegate):
 
-    def shift(self, ctx, l):
+    def shift(self, ctx):
       ctx.state_stack.append(ctx.fsm.state)
-      ctx.stack.append(l)
+      ctx.value_stack.append(ctx.input)
 
     def syntax_error(self, ctx):
       print("syntax error in action syntaxer")
       print("current state: %d" % ctx.fsm.state)
-      print("stack: %s" % ctx.stack)
+      print("stack: %s" % ctx.value_stack)
       print("state stack: %s" % ctx.state_stack)
       print("input: %s" % ctx.input)
 
-    def quit(self, ctx):
-      exit(1)
+    def reduce_1_to_action(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      action = ctx.value_stack.pop()
+      ctx.queue.append(Action(action))
 
-    def reduce_to_action(self, ctx):
+    def reduce_2_to_target(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
-      ctx.action = ctx.stack.pop()
+      ctx.value_stack.pop()
+      action = ctx.value_stack.pop()
+      ctx.action = action.value
+
+    def enqueue(self, ctx):
+      ctx.delay_queue.append(ctx.input)
 
     def reduce_1_to_fun(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
-      id = ctx.stack.pop()
+      id = ctx.value_stack.pop()
       ctx.queue.append(Fun(id))
-
-    def enqueue(self, ctx, e):
-      ctx.delay_queue.append(e)
 
     def reduce_5_to_assignment(self, ctx, c):
       ctx.fsm.state = ctx.state_stack.pop()
-      call = ctx.stack.pop()
+      call = ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      type = ctx.stack.pop()
+      type = ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      id = ctx.stack.pop()
+      id = ctx.value_stack.pop()
       ctx.queue.append(Assignment(id, type, call))
-
-    def reduce_3_to_assignment(self, ctx, c):
-      ctx.fsm.state = ctx.state_stack.pop()
-      call = ctx.stack.pop()
-      ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
-      ctx.fsm.state = ctx.state_stack.pop()
-      id = ctx.stack.pop()
-      ctx.queue.append(Assignment(id, None, call))
-
-    def reduce_2_to_fun(self, ctx):
-      ctx.fsm.state = ctx.state_stack.pop()
-      id = ctx.stack.pop()
-      ctx.fsm.state = ctx.state_stack.pop()
-      fun = ctx.stack.pop()
-      fun.names.append(id)
-      ctx.queue.append(fun)
 
     def reduce_1_to_call(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
-      fun = ctx.stack.pop()
+      fun = ctx.value_stack.pop()
       ctx.queue.append(Call(fun, []))
+
+    def reduce_2_to_fun(self, ctx):
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      fun = ctx.value_stack.pop()
+      fun.names.append(id)
+      ctx.queue.append(fun)
 
     def reduce_1_to_operands(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
-      operand = ctx.stack.pop()
+      operand = ctx.value_stack.pop()
       ctx.queue.append([operand])
 
     def reduce_3_to_call(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      fun = ctx.stack.pop()
+      fun = ctx.value_stack.pop()
       ctx.queue.append(Call(fun, []))
 
     def reduce_4_to_call(self, ctx):
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      operands = ctx.stack.pop()
+      operands = ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      ctx.stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      fun = ctx.stack.pop()
+      fun = ctx.value_stack.pop()
       ctx.queue.append(Call(fun, operands))
 
-    def reduce_2_to_operands(self, ctx):
+    def reduce_3_to_operands(self, ctx):
+      ctx.state_stack.pop()
+      operand = ctx.value_stack.pop()
+      ctx.state_stack.pop()
+      ctx.value_stack.pop()
       ctx.fsm.state = ctx.state_stack.pop()
-      operand1 = ctx.stack.pop()
+      operands = ctx.value_stack.pop()
+      operands.append(operand)
+      ctx.queue.append(operands)
+
+    def reduce_3_to_assignment(self, ctx, c):
       ctx.fsm.state = ctx.state_stack.pop()
-      operand2 = ctx.stack.pop()
-      ctx.queue.append(operand2 + operand1)
+      call = ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      ctx.value_stack.pop()
+      ctx.fsm.state = ctx.state_stack.pop()
+      id = ctx.value_stack.pop()
+      ctx.queue.append(Assignment(id, None, call))
 #+end_src
 *** lex adapter
 #+begin_src python :noweb-ref action-adapter
