@@ -128,21 +128,24 @@
             continue
           if isinstance(guard.expr, CompareExpression):
             continue
-          if isinstance(guard.expr, Expression) and isinstance(guard.expr.entity, Call):
+          if isinstance(guard.expr, Expression) and (isinstance(guard.expr.entity, Call) or isinstance(guard.expr.entity, Identifier)):
             call = guard.expr.entity
             calls[str(call)] = (transition.event, call)
     code = ''
     for (event, call) in calls.values():
       types = []
-      for operand in call.operands:
-        if isinstance(operand, Identifier):
-          for param in event.parameters:
-            if str(param.name) == str(operand):
-              types.append(_to_nim_primitive_type(str(param.type)))
-              break
-        elif isinstance(operand, Literal):
-          types.append(_to_nim_primitive_type(operand.type))
-      code += ' ' * (indent + delta) + '{funname}*: proc ({args}): bool\n'.format(funname = _nim_normalize(str(call.operator)), args = ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]))
+      if isinstance(call, Call):
+        for operand in call.operands:
+          if isinstance(operand, Identifier):
+            for param in event.parameters:
+              if str(param.name) == str(operand):
+                types.append(_to_nim_primitive_type(str(param.type)))
+                break
+          elif isinstance(operand, Literal):
+            types.append(_to_nim_primitive_type(operand.type))
+        code += ' ' * (indent + delta) + '{funname}*: proc ({args}): bool\n'.format(funname = _nim_normalize(str(call.operator)), args = ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]))
+      else:
+        code += ' ' * (indent + delta) + '{funname}*: proc ({args}): bool\n'.format(funname = _nim_normalize(str(call)), args = 'ctx: T')
     if code != '':
       code = ' ' * indent + prefix + 'GuardDelegate*[T] = ref object of RootObj\n' + code + '\n'
     return code
@@ -349,9 +352,9 @@
       args = []
       for p in action_parameter_signatures:
         if p in parameter_signatures:
-          args.append('some(%s)' % p.split(':')[0])
+          args.append('some(%s)' % p.split(':')[0].strip())
         else:
-          args.append('none(%s)' % p.split(':')[1])
+          args.append('none(%s)' % p.split(':')[1].strip())
       if len(guards) == 1 and guards[0] == '':
         (transition, event_tag) = guardmappings['']
         eventimpl += ' ' * delta + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
@@ -367,6 +370,8 @@
           guard = transition.guard
           if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
             eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity.operator)), args = ', '.join(['ctx'] + [str(x) for x in guard.expr.entity.operands]))
+          elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
+            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity)), args = 'ctx')
           else:
             eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = str(guard))
           eventimpl += ' ' * (delta * 2) + 'let idx = (fsm.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
