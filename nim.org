@@ -503,7 +503,7 @@
       "long": "int64",
       "ulong": "uint64",
       "float": "float",
-      "number": "long",
+      "number": "int",
       "string": "string",
     }
     if origin_type in types:
@@ -565,7 +565,9 @@
         used_args = []
         keys = renamed_args.keys()
         for operand in action.operands:
-          if str(operand.name) in keys:
+          if isinstance(operand, Literal):
+            used_args.append(str(operand))
+          elif str(operand.name) in keys:
             used_args.append(renamed_args[str(operand.name)])
         code += ' ' * indent + 'let ctx{nextidx} ={awaitprefix} fsm.action_delegate.{funname}({args})\n'.format(nextidx = idx + 1, funname = _nim_normalize(str(action.operator)), args = ', '.join(['ctx%d' % idx] + used_args), awaitprefix = awaitprefix)
       elif isinstance(action, Assignment):
