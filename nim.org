@@ -86,6 +86,7 @@
           elif isinstance(action, Assignment):
             for call in find_call_in_expression(action.expression):
               actions[str(call.operator)] = (transition.event, call)
+    funs = []
     code = ''
     for (event, action) in actions.values():
       if len(str(action.operator)) == 0:
@@ -108,12 +109,13 @@
         returntype = '(T, %s)' % returntype
       if asynced:
         returntype = 'Future[%s]' % returntype
-      code += ' ' * (indent + delta) + '{funname}*: proc ({args}): {returntype}\n'.format(funname = _nim_normalize(str(action.operator)), args = ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype = returntype)
-    if code != '':
+      funs.append(' ' * (indent + delta) + '{funname}*: proc ({args}): {returntype}'.format(funname = _nim_normalize(str(action.operator)), args = ', '.join(['ctx: T'] + ['a{0}: {1}'.format(i, t) for (i, t) in enumerate(types)]), returntype = returntype))
+    funs.sort()
+    if len(funs) != 0:
       if asynced:
-        code = ' ' * indent + prefix + 'AsyncActionDelegate*[T] = ref object of RootObj\n' + code + '\n'
+        code = ' ' * indent + prefix + 'AsyncActionDelegate*[T] = ref object of RootObj\n' + '\n'.join(funs) + '\n\n'
       else:
-        code = ' ' * indent + prefix + 'ActionDelegate*[T] = ref object of RootObj\n' + code + '\n'
+        code = ' ' * indent + prefix + 'ActionDelegate*[T] = ref object of RootObj\n' + '\n'.join(funs) + '\n\n'
     return code
 #+end_src
 **** guard delegate
