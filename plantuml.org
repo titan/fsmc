@@ -1,0 +1,52 @@
+#+STARTUP: indent
+* Plantuml
+** framework
+#+begin_src python :tangle ${BUILDDIR}/plantuml.py
+  from typing import List, Mapping
+  from model import Event, Parameter, State, Transition, Variable
+  from semantic import Assignment, Call, Identifier, CompareExpression, Expression, BoolExpression
+  from analyzer import find_call_in_expression
+  from utility import normalize
+
+  <<exporter>>
+
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<save-states>>
+
+  <<save-state-machine>>
+
+  def save(dst: str, variables: List[Variable], states: List[State], args):
+    import os.path
+    if dst.endswith('plantuml'):
+      dst = dst[:-8] + "uml"
+    with open(dst, 'w') as f:
+      f.write('@startuml\n\n')
+      f.write(_save_states(states))
+      f.write(_save_state_machine(states))
+      f.write('@enduml\n')
+#+end_src
+*** states
+#+begin_src python :noweb-ref save-states
+  def _save_states(states: List[State]) -> str:
+    code = '\n'.join(['state "{0}" as state{1}'.format(state.name.replace('\n', '\\n'), idx) for idx, state in enumerate(states)]) + '\n'
+    return code + '\n'
+#+end_src
+*** state machine
+#+begin_src python :noweb-ref save-state-machine
+  def _save_state_machine(states: List[State]) -> str:
+    mapping = {}
+    for (idx, state) in enumerate(states):
+      mapping[state] = idx
+    code = '[*] --> state0\n'
+    for state in states:
+      for transition in state.transitions:
+        if transition.target:
+          code += 'state{0} --> state{1} : {2}{3}\n'.format(mapping[state], mapping[transition.target], transition.event, "[%s]" % transition.guard if transition.guard else "")
+        elif len(transition.actions) > 0:
+          code += 'state{0} --> state{1} : {2}{3}\n'.format(mapping[state], mapping[state], transition.event, "[%s]" % transition.guard if transition.guard else "")
+    code += '\n'
+    return code
+#+end_src

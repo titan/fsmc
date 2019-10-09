@@ -22,6 +22,7 @@
   import table
   import pony
   import nim
+  import plantuml
 
   importers = {
     'json': jsonio.load,
@@ -43,6 +44,7 @@
     'txt': table.save,
     'pony': pony.save,
     'nim': nim.save,
+    'plantuml': plantuml.save,
   }
 
   def main(args):
