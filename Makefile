@@ -3,8 +3,8 @@ NAME=fsmc
 include .config
 ESCAPED_BUILDDIR = $(shell echo '${BUILDDIR}' | sed 's%/%\\/%g')
 TARGET=fsmc.py model.py jsonio.py python.py utility.py excel.py semantic.py analyzer.py lexer.py table.py pony.py nim.py plantuml.py
-SYMFSM=guard_fsm.py
-SYMBNFFSM=header_fsm.py action_fsm.py
+SYMFSM=
+SYMBNFFSM=header_fsm.py action_fsm.py guard_fsm.py
 LEXFSM=lexer_fsm.py
 TABLEFSM=table_fsm.py
 
@@ -31,10 +31,10 @@ $(SYMFSM): %.py: %.txt
 $(subst .py,.txt,$(SYMFSM)): analyzer.org
 	sed 's/$$$\{BUILDDIR}/$(ESCAPED_BUILDDIR)/g' $< | org-tangle -
 
-$(SYMBNFFSM): %.py: %.txt
+$(SYMBNFFSM): %.py: %.xlsx
 	fsmc.py $(addprefix $(BUILDDIR)/, $(notdir $<)) -t python
 
-$(subst .py,.txt,$(SYMBNFFSM)): %.txt: %.bnf
+$(subst .py,.xlsx,$(SYMBNFFSM)): %.xlsx: %.bnf
 	bnf2fsm.py $(addprefix $(BUILDDIR)/, $(notdir $<)) $(addprefix $(BUILDDIR)/, $(notdir $@)) --fsmc
 
 $(subst .py,.bnf,$(SYMBNFFSM)): analyzer.org

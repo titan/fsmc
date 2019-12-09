@@ -293,7 +293,7 @@
 
 ** UnionType
 #+begin_src python :noweb-ref union-type
-  class UnionType():
+  class UnionType(Type):
     kind: int
     types: List[Type]
 
@@ -307,7 +307,7 @@
 
 ** ListType
 #+begin_src python :noweb-ref list-type
-  class ListType():
+  class ListType(Type):
     kind: int
     type: Type
 

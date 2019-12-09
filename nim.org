@@ -97,12 +97,13 @@
         if isinstance(operand, Identifier):
           for param in event.parameters:
             if str(param.name) == str(operand):
-              types.append(_to_nim_primitive_type(str(param.type)))
+              types.append(_to_nim_type(param.type))
               break
         elif isinstance(operand, Literal):
           types.append(_to_nim_primitive_type(operand.type))
       if action.type != None:
-        returntype = _to_nim_primitive_type(_nim_normalize(str(action.type)))
+        #returntype = _to_nim_primitive_type(_nim_normalize(str(action.type)))
+        returntype = _to_nim_type(action.type)
       if returntype == '':
         returntype = 'T'
       else:
@@ -510,14 +511,27 @@
       return types[origin_type]
     else:
       return origin_type
+
+  def _to_nim_type(origin_type: type) -> str:
+    if origin_type.kind == 1:
+      subtypes = []
+      for subtype in origin_type.types:
+        subtypes.append(str(subtype.type) if str(subtype.type) in _nim_builtin_types else _to_nim_primitive_type(str(subtype.type)))
+      return " | ".join(subtypes)
+    elif origin_type.kind == 2:
+      subtype = str(origin_type.type) if str(origin_type.type) in _nim_builtin_types else _to_nim_primitive_type(str(origin_type.type))
+      return 'seq[%s]' % subtype
+    elif origin_type.kind == 3:
+      keytype = str(origin_type.keytype) if str(origin_type.keytype) in _nim_builtin_types else _to_nim_primitive_type(str(origin_type.keytype))
+      valtype = str(origin_type.valtype) if str(origin_type.valtype) in _nim_builtin_types else _to_nim_primitive_type(str(origin_type.valtype))
+      return 'TableRef[%s, %s]' % (keytype, valtype)
+    else:
+      return _to_nim_primitive_type(str(origin_type))
 #+end_src
 **** signature
 #+begin_src python :noweb-ref signature
   def _parameter_to_nim_signature(p: Parameter) -> str:
-    if p.type in _nim_builtin_types:
-      return '%s: %s' % (p.name, p.type)
-    else:
-      return '%s: %s' % (p.name, _to_nim_primitive_type(str(p.type)))
+    return '%s: %s' % (p.name, _to_nim_type(p.type))
 
   def _action_parameter_signatures(events: List[Event]) -> List[str]:
     parameters = {}
