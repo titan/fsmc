@@ -101,11 +101,16 @@
     name: str
     transitions: List[Transition]
     substates = List[State]
+    on_enter: List[Union[Assignment, Call]]
+    on_exit: List[Union[Assignment, Call]]
+
 
     def __init__(self):
       self.name = None
       self.transitions = []
       self.substates = []
+      self.on_enter = []
+      self.on_exit = []
 #+end_src
 ** transition
 #+begin_src python :noweb-ref transition

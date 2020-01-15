@@ -249,7 +249,6 @@
                   string = '%s(%s)' % (str(call.operator).replace(' ', '-'), ', '.join([str(x) for x in call.operands]))
                 else:
                   string = str(call.operator).replace(' ', '-')
-                args = ''.join([str(x) for x in transition.actions[0].operands])
                 actionblock = ', '.join(['%s: %s' % (str(x.name), x.type) for x in transition.event.parameters]) + '\n' + str(transition.actions[0])
                 if actionblock not in actionblocks:
                   action = 'actionblock{id}'.format(id = actionblockid)
@@ -333,20 +332,38 @@
         actionnames.add(col)
     eventreturntype = 'Future[({prefix}{asyncprefix}StateMachine[T], T)] {{.async.}}'.format(prefix = prefix, asyncprefix = asyncprefix) if asynced else '({prefix}{asyncprefix}StateMachine[T], T)'.format(prefix = prefix, asyncprefix = asyncprefix)
     eventimpl = 'proc exec[T]({params}): {returntype} =\n'.format(params = (', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "idx: int", "ctx: T"] + optional_action_parameter_signatures)), returntype = eventreturntype)
-    eventimpl += ' ' * delta + 'let newctx = case transition_actions[idx]:\n'
-    casebaseindent = len(' ' * delta + 'let newctx = ')
+    eventimpl += ' ' * delta + 'let newstate = fsm.state + transition_states[idx]\n'
+    eventimpl += ' ' * delta + 'if newstate != fsm.state:\n'
+    eventimpl += ' ' * (delta * 2) + 'let\n'
+    eventimpl += ' ' * (delta * 3) + 'newctx1 = case fsm.state:\n'
+    casebaseindent = len(' ' * (delta * 3) + 'newctx1 = ')
+    for (idx, state) in enumerate(states):
+      if len(state.on_exit) == 0:
+        continue
+      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} on_exit_actionblock{idx}[T](fsm, ctx)\n'.format(idx = idx + 1, awaitprefix = awaitprefix)
+    eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
+    eventimpl += ' ' * (delta * 3) + 'newctx2 = case transition_actions[idx]:\n'
+    casebaseindent = len(' ' * (delta * 3) + 'newctx2 = ')
+    for i in range(1, len(actionnames)):
+      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} {action}[T]({args})\n'.format(idx = i, awaitprefix = awaitprefix, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'newctx1'] + [x.split(':')[0] for x in action_parameter_signatures]))
+    eventimpl += ' ' * (casebaseindent + delta) + 'else: newctx1\n'
+    eventimpl += ' ' * (delta * 3) + 'newctx3 = case newstate:\n'
+    casebaseindent = len(' ' * (delta * 3) + 'newctx3 = ')
+    for (idx, state) in enumerate(states):
+      if len(state.on_enter) == 0:
+        continue
+      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} on_enter_actionblock{idx}[T](fsm, newctx2)\n'.format(idx = idx + 1, awaitprefix = awaitprefix)
+    eventimpl += ' ' * (casebaseindent + delta) + 'else: newctx2\n'
+    eventimpl += ' ' * (delta * 2) + 'fsm.state = newstate\n'
+    eventimpl += ' ' * (delta * 2) + 'result = (fsm, newctx3)\n'
+    eventimpl += ' ' * delta + 'else:\n'
+    eventimpl += ' ' * (delta * 2) + 'let newctx = case transition_actions[idx]:\n'
+    casebaseindent = len(' ' * (delta * 2) + 'let newctx = ')
     for i in range(1, len(actionnames)):
       eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} {action}[T]({args})\n'.format(idx = i, awaitprefix = awaitprefix, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
     eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
-    eventimpl += ' ' * delta + 'let newfsm = new({prefix}{asyncprefix}StateMachine[T])\n'.format(prefix = prefix, asyncprefix = asyncprefix)
-    eventimpl += ' ' * delta + 'newfsm.state = fsm.state + transition_states[idx]\n'
-    if need_action_delegate:
-      eventimpl += ' ' * delta + 'newfsm.action_delegate = fsm.action_delegate\n'
-    if need_guard_delegate:
-      eventimpl += ' ' * delta + 'newfsm.guard_delegate = fsm.guard_delegate\n'
-    if need_variable_delegate:
-      eventimpl += ' ' * delta + 'newfsm.variable_delegate = fsm.variable_delegate\n'
-    eventimpl += ' ' * delta + 'result = (newfsm, newctx)\n\n'
+    eventimpl += ' ' * (delta * 2) + 'fsm.state = newstate\n'
+    eventimpl += ' ' * (delta * 2) + 'result = (fsm, newctx)\n\n'
 
     for (event, guardmappings) in events.items():
       parameter_signatures = [_parameter_to_nim_signature(x) for x in event.parameters]
@@ -394,31 +411,9 @@
           eventimpl += ' ' * (delta * 2) + 'result = (fsm, ctx)\n'
       eventimpl += '\n'
 
-    actionimpl = ''
-    for state in states:
-      for transition in state.transitions:
-        if len(transition.actions) == 0:
-          continue
-        elif len(transition.actions) == 1:
-          if isinstance(transition.actions[0], Call):
-            args = ''.join([str(x) for x in transition.actions[0].operands])
-            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
-          elif isinstance(transition.actions[0], Assignment):
-            actionblock = str(transition.actions[0])
-          else:
-            continue
-        else:
-          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
-        (action, generated) = actionblocks[actionblock]
-        if generated:
-          continue
-        actionfun = action
-        actionblocks[actionblock] = (action, True)
-
-        actionimpl += 'proc {funname}[T]({args}): {returntype} =\n'.format(funname = actionfun, args = ', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "ctx0: T"] + optional_action_parameter_signatures), returntype = returntype)
-        used_params = _get_used_parameters(transition)
-        actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, transition, prefix, asynced)
-        actionimpl += '\n'
+    actionimpl = _generate_state_on_enter_actions(states, prefix, asynced)
+    actionimpl += _generate_state_on_exit_actions(states, prefix, asynced)
+    actionimpl += _generate_actions(states, optional_action_parameter_signatures, actionblocks, prefix, asynced)
 
     typedecl = ' ' * indent + '{prefix}{asyncprefix}StateMachine*[T] = ref object of RootObj\n'.format(prefix = prefix, asyncprefix = asyncprefix)
     typedecl += ' ' * (indent + delta) + 'state*: int\n'
@@ -469,6 +464,10 @@
   <<get-used-parameters>>
 
   <<lift-arguments>>
+
+  <<generate-actions>>
+
+  <<generate-state-actions>>
 #+end_src
 **** normalize
 #+begin_src python :noweb-ref normalize
@@ -569,12 +568,12 @@
 #+end_src
 **** lift arguments
 #+begin_src python :noweb-ref lift-arguments
-  def _generate_action_body(indent: int, transition: Transition, renamed_args: Mapping[str, str], asynced: bool) -> str:
+  def _generate_action_body(indent: int, actions: List[Union[Assignment, Call]], renamed_args: Mapping[str, str], asynced: bool) -> str:
     awaitprefix = ' await' if asynced else ''
     code = ''
     idx = 0
     varidx = 0
-    for action in transition.actions:
+    for action in actions:
       if isinstance(action, Call):
         used_args = []
         keys = renamed_args.keys()
@@ -607,18 +606,82 @@
     code += ' ' * indent + 'result = ctx{idx}\n'.format(idx = idx)
     return code
 
-  def _generate_recursive_lifting_arguments(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], transition: Transition, prefix: str, asynced: bool) -> str:
+  def _generate_recursive_lifting_arguments(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], actions: List[Union[Assignment, Call]], prefix: str, asynced: bool) -> str:
     code = ''
     if len(used_params) == 0:
-      return _generate_action_body(indent, transition, renamed_args, asynced)
+      return _generate_action_body(indent, actions, renamed_args, asynced)
     else:
       param = used_params.pop(0)
       renamed_param = Parameter(Identifier('arg%d' % indent), param.type)
       renamed_args[str(param.name)] = 'arg%d' % indent
       code += ' ' * indent + 'if {argname}.isSome:\n'.format(argname = param.name)
       code += ' ' * (indent + delta) + 'let {argdef} = {argname}.get()\n'.format(argdef = renamed_args[str(param.name)] , argname = param.name)
-      code += ' ' * (indent + delta) + _generate_recursive_lifting_arguments(indent + delta, used_params, renamed_args, transition, prefix, asynced).strip() + '\n'
+      code += ' ' * (indent + delta) + _generate_recursive_lifting_arguments(indent + delta, used_params, renamed_args, actions, prefix, asynced).strip() + '\n'
       code += ' ' * indent + 'else:\n'
       code += ' ' * (indent + delta) + 'result = ctx0\n'
       return code
+#+end_src
+**** generate actions
+#+begin_src python :noweb-ref generate-actions
+  def _generate_actions(states: List[State], optional_action_parameter_signatures: List[str], actionblocks: Mapping[str, Tuple[str, bool]], prefix: str, asynced: bool) -> str:
+    asyncprefix = 'Async' if asynced else ''
+    awaitprefix = ' await' if asynced else ''
+    returntype = 'Future[T] {.async.}' if asynced else 'T'
+    actionimpl = ''
+    for state in states:
+      for transition in state.transitions:
+        if len(transition.actions) == 0:
+          continue
+        elif len(transition.actions) == 1:
+          if isinstance(transition.actions[0], Call):
+            actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+          elif isinstance(transition.actions[0], Assignment):
+            actionblock = str(transition.actions[0])
+          else:
+            continue
+        else:
+          actionblock = ', '.join(['%s: %s' % (x.name, x.type) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+        (action, generated) = actionblocks[actionblock]
+        if generated:
+          continue
+        actionfun = action
+        actionblocks[actionblock] = (action, True)
+
+        actionimpl += 'proc {funname}[T]({args}): {returntype} =\n'.format(funname = actionfun, args = ', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "ctx0: T"] + optional_action_parameter_signatures), returntype = returntype)
+        used_params = _get_used_parameters(transition)
+        actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, transition.actions, prefix, asynced)
+        actionimpl += '\n'
+    return actionimpl
+#+end_src
+**** generate state actions
+#+begin_src python :noweb-ref generate-state-actions
+  def _generate_state_on_enter_actions(states: List[State], prefix: str, asynced: bool) -> str:
+    asyncprefix = 'Async' if asynced else ''
+    awaitprefix = ' await' if asynced else ''
+    returntype = 'Future[T] {.async.}' if asynced else 'T'
+    actionimpl = ''
+    for idx, state in enumerate(states):
+      if len(state.on_enter) == 0:
+        continue
+
+      actionimpl += 'proc on_enter_actionblock{idx}[T]({args}): {returntype} =\n'.format(idx = idx + 1, args = ', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "ctx0: T"]), returntype = returntype)
+      used_params = []
+      actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, state.on_enter, prefix, asynced)
+      actionimpl += '\n'
+    return actionimpl
+
+  def _generate_state_on_exit_actions(states: List[State], prefix: str, asynced: bool) -> str:
+    asyncprefix = 'Async' if asynced else ''
+    awaitprefix = ' await' if asynced else ''
+    returntype = 'Future[T] {.async.}' if asynced else 'T'
+    actionimpl = ''
+    for idx, state in enumerate(states):
+      if len(state.on_exit) == 0:
+        continue
+
+      actionimpl += 'proc on_exit_actionblock{idx}[T]({args}): {returntype} =\n'.format(idx = idx + 1, args = ', '.join(["fsm: {prefix}{asyncprefix}StateMachine[T]".format(prefix = prefix, asyncprefix = asyncprefix), "ctx0: T"]), returntype = returntype)
+      used_params = []
+      actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, state.on_exit, prefix, asynced)
+      actionimpl += '\n'
+    return actionimpl
 #+end_src

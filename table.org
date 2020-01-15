@@ -224,7 +224,30 @@
       state = State()
       #if row[0].count('.') != 0:
       #  continue
-      state.name = row[0]
+      parts = row[0].split('----')
+      state.name = parts[0].replace('\n', '')
+      if len(parts) > 1:
+        for line in parts[1].split('\n'):
+          if len(line) == 0:
+            continue
+          syntaxer = ActionSyntaxer()
+          lexer = Lexer(ActionLexerAdapter(syntaxer))
+          for ch in line:
+            lexer.feed(ch)
+          lexer.eof()
+          syntaxer.eof()
+          state.on_enter.append(syntaxer.result())
+      if len(parts) == 3:
+        for line in parts[2].split('\n'):
+          if len(line) == 0:
+            continue
+          syntaxer = ActionSyntaxer()
+          lexer = Lexer(ActionLexerAdapter(syntaxer))
+          for ch in line:
+            lexer.feed(ch)
+          lexer.eof()
+          syntaxer.eof()
+          state.on_exit.append(syntaxer.result())
       for j in range(1, len(row)):
         transition = Transition()
         transition._targetstrs = []
@@ -394,7 +417,11 @@
       row = []
       for cell in line:
         if isinstance(cell, State):
-          row.append(cell.name)
+          if len(cell.on_enter) != 0 or len(cell.on_exit) != 0:
+            value = cell.name + '\n----\n' + '\n'.join([str(x) for x in cell.on_enter]) + '\n----\n' + '\n'.join([str(x) for x in cell.on_exit])
+            row.append(value)
+          else:
+            row.append(cell.name)
         elif isinstance(cell, tuple):
           (state, actions) = cell
           content = ''
