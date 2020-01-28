@@ -362,7 +362,6 @@
     for i in range(1, len(actionnames)):
       eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} {action}[T]({args})\n'.format(idx = i, awaitprefix = awaitprefix, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
     eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
-    eventimpl += ' ' * (delta * 2) + 'fsm.state = newstate\n'
     eventimpl += ' ' * (delta * 2) + 'result = (fsm, newctx)\n\n'
 
     for (event, guardmappings) in events.items():

@@ -96,8 +96,10 @@
       #if row[0].value.count('.') != 0:
       #  continue
       parts = row[0].value.split('----')
-      state.name = parts[0].replace('\n', '')
+      if len(parts) == 1:
+        state.name = parts[0]
       if len(parts) > 1:
+        state.name = parts[0][:-1]
         for line in parts[1].split('\n'):
           if len(line) == 0:
             continue
@@ -109,6 +111,7 @@
           syntaxer.eof()
           state.on_enter.append(syntaxer.result())
       if len(parts) == 3:
+        state.name = parts[0][:-1]
         for line in parts[2].split('\n'):
           if len(line) == 0:
             continue
