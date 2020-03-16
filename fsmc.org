@@ -45,6 +45,7 @@
     'pony': pony.save,
     'nim': nim.save,
     'plantuml': plantuml.save,
+    'uml': plantuml.save,
   }
 
   def main(args):

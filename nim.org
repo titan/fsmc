@@ -79,6 +79,17 @@
   def _save_action_delegate(indent: int, varaibles: List[Variable], states: List[State], prefix: str, asynced: bool) -> str:
     actions = {}
     for state in states:
+      actionlist = []
+      if len(state.on_enter) > 0:
+        actionlist += state.on_enter
+      if len(state.on_exit) > 0:
+        actionlist += state.on_exit
+      for action in actionlist:
+        if isinstance(action, Call):
+          actions[str(action.operator)] = (None, action)
+        elif isinstance(action, Assignment):
+          for call in find_call_in_expression(action.expression):
+            actions[str(call.operator)] = (None, call)
       for transition in state.transitions:
         for action in transition.actions:
           if isinstance(action, Call):
@@ -95,10 +106,11 @@
       returntype = ''
       for operand in action.operands:
         if isinstance(operand, Identifier):
-          for param in event.parameters:
-            if str(param.name) == str(operand):
-              types.append(_to_nim_type(param.type))
-              break
+          if event:
+            for param in event.parameters:
+              if str(param.name) == str(operand):
+                types.append(_to_nim_type(param.type))
+                break
         elif isinstance(operand, Literal):
           types.append(_to_nim_primitive_type(operand.type))
       if action.type != None:
@@ -335,17 +347,17 @@
     eventimpl += ' ' * delta + 'let newstate = fsm.state + transition_states[idx]\n'
     eventimpl += ' ' * delta + 'if newstate != fsm.state:\n'
     eventimpl += ' ' * (delta * 2) + 'let\n'
-    eventimpl += ' ' * (delta * 3) + 'newctx1 = case fsm.state:\n'
+    eventimpl += ' ' * (delta * 3) + 'newctx1 = case transition_actions[idx]:\n'
     casebaseindent = len(' ' * (delta * 3) + 'newctx1 = ')
+    for i in range(1, len(actionnames)):
+      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} {action}[T]({args})\n'.format(idx = i, awaitprefix = awaitprefix, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'ctx'] + [x.split(':')[0] for x in action_parameter_signatures]))
+    eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
+    eventimpl += ' ' * (delta * 3) + 'newctx2 = case fsm.state:\n'
+    casebaseindent = len(' ' * (delta * 3) + 'newctx2 = ')
     for (idx, state) in enumerate(states):
       if len(state.on_exit) == 0:
         continue
-      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} on_exit_actionblock{idx}[T](fsm, ctx)\n'.format(idx = idx + 1, awaitprefix = awaitprefix)
-    eventimpl += ' ' * (casebaseindent + delta) + 'else: ctx\n'
-    eventimpl += ' ' * (delta * 3) + 'newctx2 = case transition_actions[idx]:\n'
-    casebaseindent = len(' ' * (delta * 3) + 'newctx2 = ')
-    for i in range(1, len(actionnames)):
-      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} {action}[T]({args})\n'.format(idx = i, awaitprefix = awaitprefix, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'newctx1'] + [x.split(':')[0] for x in action_parameter_signatures]))
+      eventimpl += ' ' * (casebaseindent + delta) + 'of {idx}:{awaitprefix} on_exit_actionblock{idx}[T](fsm, newctx1)\n'.format(idx = idx + 1, awaitprefix = awaitprefix)
     eventimpl += ' ' * (casebaseindent + delta) + 'else: newctx1\n'
     eventimpl += ' ' * (delta * 3) + 'newctx3 = case newstate:\n'
     casebaseindent = len(' ' * (delta * 3) + 'newctx3 = ')
