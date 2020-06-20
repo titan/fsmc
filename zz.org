@@ -1,0 +1,824 @@
+#+STARTUP: indent
+* ZZ
+** framework
+#+begin_src python :tangle ${BUILDDIR}/zz.py
+  from typing import List, Mapping, Tuple, Union
+  from model import Event, Parameter, State, Transition, Variable
+  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
+  from analyzer import find_call_in_expression
+  from utility import normalize
+
+  delta = 2 # indent
+
+  <<exporter>>
+
+#+end_src
+** exporter
+*** basic
+#+begin_src python :noweb-ref exporter
+  <<utility>>
+
+  <<save-states>>
+
+  <<save-delegates>>
+
+  <<save-state-machine>>
+
+  def save(dst: str, variables: List[Variable], states: List[State], args):
+    import os.path
+    (path, filename) = os.path.split(dst)
+    (name, ext) = os.path.splitext(filename)
+    module = name.replace(' ', '_').replace('-', '_')
+    dst = os.path.join(path, module + ext)
+    prefix = module
+    header = 'using %s_model::{StateMachineModel}\n\n' % (prefix)
+    theory = 'pub theory is_in_state(StateMachineModel mut* mod, State state) -> bool;\n\n'
+    code1 = _save_states(0, states, prefix)
+    (code2_1, code2_2, code2_3) = _save_delegates(0, variables, states, prefix)
+    code2 = code2_2 + code2_3 + code2_1
+    (code3_1, code3_2, code3_3) = _save_state_machine(0, states, args.debug, code2_1 != '', code2_2 != '', code2_3 != '', prefix)
+    code3 = code3_1 + code3_2 + code3_3
+    with open(dst, 'w') as f:
+      f.write(header + code1 + theory + code2 + code3)
+#+end_src
+*** states
+#+begin_src python :noweb-ref save-states
+  def _save_states(indent: int, states: List[State], prefix: str) -> str:
+    code = 'pub enum State {\n'
+    code += ',\n'.join([' ' * (indent + delta) + '{state} = {index}'.format(state = _state_to_string(x), index = states.index(x) + 1) for x in states])
+    return code + '\n}\n\n'
+#+end_src
+*** delegates
+#+begin_src python :noweb-ref save-delegates
+  <<action-delegate>>
+  <<guard-delegate>>
+  <<variable-delegate>>
+  def _save_delegates(indent: int, variables: List[Variable], states: List[State], prefix: str) -> str:
+    code1 = _save_action_delegate(indent, variables, states, prefix)
+    code2 = _save_guard_delegate(indent, states, prefix)
+    code3 = _save_variable_delegate(indent, variables, prefix)
+    return (code1, code2, code3)
+#+end_src
+**** action delegate
+#+begin_src python :noweb-ref action-delegate
+  def _save_action_delegate(indent: int, varaibles: List[Variable], states: List[State], prefix: str) -> str:
+    actions = {}
+    for state in states:
+      actionlist = []
+      if len(state.on_enter) > 0:
+        actionlist += state.on_enter
+      if len(state.on_exit) > 0:
+        actionlist += state.on_exit
+      for action in actionlist:
+        if isinstance(action, Call):
+          actions[str(action.operator)] = (None, action)
+        elif isinstance(action, Assignment):
+          for call in find_call_in_expression(action.expression):
+            actions[str(call.operator)] = (None, call)
+      for transition in state.transitions:
+        for action in transition.actions:
+          if isinstance(action, Call):
+            actions[str(action.operator)] = (transition.event, action)
+          elif isinstance(action, Assignment):
+            for call in find_call_in_expression(action.expression):
+              actions[str(call.operator)] = (transition.event, call)
+    funs = []
+    code = ''
+    for (event, action) in actions.values():
+      aidx = 0
+      if len(str(action.operator)) == 0:
+        continue
+      types = []
+      returntype = ''
+      for operand in action.operands:
+        if isinstance(operand, Identifier):
+          if event:
+            for param in event.parameters:
+              if str(param.name) == str(operand):
+                types.append((str(param.name), _to_zz_type(param.type)))
+                break
+        elif isinstance(operand, Literal):
+          types.append(("a%d" % aidx, _to_zz_primitive_type(operand.type)))
+          aidx += 1
+      if action.type != None:
+        #returntype = _to_zz_primitive_type(_zz_normalize(str(action.type)))
+        returntype = _to_zz_type(action.type)
+      if returntype == '':
+        returntype = 'void'
+      else:
+        returntype = returntype
+      funs.append((_zz_normalize(str(action.operator)), 'fntype {funname}_t ({args}) -> {returntype};'.format(funname = 'action_' + _zz_normalize(str(action.operator)), args = ', '.join(['StateMachineModel mut* mod'] + [ t + ' ' + n for (n, t) in types]), returntype = returntype)))
+    funs.sort()
+    if len(funs) != 0:
+      code = ' ' * (indent) + '\n'.join([t for (_, t) in funs]) + '\n\n'
+      code += ' ' * (indent) + 'pub struct ActionDelegate {\n'
+      code += ''.join([' ' * (indent + delta) + 'action_{name}_t {name};\n'.format(name = str(n)) for (n, _) in funs])
+      code += ' ' * (indent) + '}\n\n'
+    return code
+
+#+end_src
+**** guard delegate
+#+begin_src python :noweb-ref guard-delegate
+  def _save_guard_delegate(indent: int, states: List[State], prefix: str) -> Tuple[List[str], str]:
+    calls = {}
+    for state in states:
+      for transition in state.transitions:
+        guard = transition.guard
+        if guard:
+          if isinstance(guard.expr, BoolExpression):
+            continue
+          if isinstance(guard.expr, CompareExpression):
+            continue
+          if isinstance(guard.expr, Expression) and (isinstance(guard.expr.entity, Call) or isinstance(guard.expr.entity, Identifier)):
+            call = guard.expr.entity
+            calls[str(call)] = (transition.event, call)
+    funs = []
+    code = ''
+    for (event, call) in calls.values():
+      aidx = 0
+      types = []
+      if isinstance(call, Call):
+        for operand in call.operands:
+          if isinstance(operand, Identifier):
+            for param in event.parameters:
+              if str(param.name) == str(operand):
+                types.append((str(param.name), _to_zz_primitive_type(str(param.type))))
+                break
+          elif isinstance(operand, Literal):
+            types.append(('a%d' % aidx, _to_zz_primitive_type(operand.type)))
+            aidx += 1
+        funs.append((_zz_normalize(str(call.operator)), 'pub closure {funname}_t ({args}) -> bool;'.format(funname = 'guard_' + _zz_normalize(str(call.operator)), args = ', '.join(['StateMachineModel * mod'] + [t + ' ' + n for (n, t) in types]))))
+      else:
+        funs.append((_zz_normalize(str(call)), 'pub closure {funname}_t ({args}) -> bool;'.format(funname = 'guard_' + _zz_normalize(str(call)), args = 'StateMachineModel * mod')))
+    if len(funs) != 0:
+      code = ' ' * (indent) + '\n'.join([t for (_, t) in funs]) + '\n\n'
+      code += ' ' * (indent) + 'pub struct GuardDelegate {\n'
+      code += ''.join([' ' * (indent + delta) + 'guard_{name}_t {name};\n'.format(name = str(n)) for (n, _) in funs])
+      code += ' ' * (indent) + '}\n\n'
+    return code
+#+end_src
+**** variable delegate
+#+begin_src python :noweb-ref variable-delegate
+  def _save_variable_delegate(indent: int, variables: List[Variable], prefix: str) -> Tuple[List[str], str]:
+    types = {}
+    funs = []
+    code = ''
+    for variable in variables:
+      if variable.type in _zz_builtin_types:
+        type = variable.type
+      else:
+        type = _to_zz_primitive_type(variable.type)
+        types[type] = 0
+      funs.append((_zz_normalize(variable.name), 'pub closure on_{varname}_changed_t (StateMachineModel * mod, {vartype} v) -> void;'.format(varname = _zz_normalize(variable.name), vartype = type)))
+    if len(funs) != 0:
+      code = ' ' * (indent) + '\n'.join([t for (_, t) in funs]) + '\n\n'
+      code += ' ' * (indent) + 'pub struct VariableDelegate {\n'
+      code += ''.join([' ' * (indent + delta) + 'on_{name}_changed_t on_{name}_changed;\n'.format(name = str(n)) for (n, _) in funs])
+      code += ' ' * (indent) + '}\n\n'
+    return code
+#+end_src
+*** state machine
+#+begin_src python :noweb-ref save-state-machine
+  def _get_event_data(states: List[State]) -> Tuple[Mapping[Event, Mapping[str, Tuple[Transition, str]]], Mapping[str, Tuple[Event, int]]]:
+    events = {}
+    extended_events = {}
+    for state in states:
+      for transition in state.transitions:
+        event = transition.event
+        if event not in events:
+          events[event] = [transition]
+        else:
+          events[event].append(transition)
+    evtidx = 0
+    for (event, transitions) in events.items():
+      guardmappings = {}
+      for transition in transitions:
+        if transition.guard:
+          guardmappings[str(transition.guard)] = (transition, None)
+        else:
+          guardmappings[''] = (transition, None)
+      events[event] = guardmappings
+      guards = [x for x in guardmappings.keys()]
+      if len(guards) == 1 and guards[0] == '':
+        event_tag = normalize(event.name)
+        extended_events[event_tag] = (event, evtidx)
+        evtidx += 1
+        guardmappings[''] = (guardmappings[''][0], event_tag)
+      else:
+        for guardstr in guards:
+          if guardstr == '':
+            continue
+          (transition, _) = guardmappings[guardstr]
+          guard = transition.guard
+          event_tag = normalize(event.name) + '_' + normalize(str(guard))
+          extended_events[event_tag] = (event, evtidx)
+          evtidx += 1
+          guardmappings[guardstr] = (guardmappings[guardstr][0], event_tag)
+        if '' in guards:
+          event_tag = normalize(event.name)
+          extended_events[event_tag] = (event, evtidx)
+          evtidx += 1
+          guardmappings[''] = (guardmappings[''][0], event_tag)
+    return (events, extended_events)
+
+  def _get_target_and_action_data(states: List[State], extended_events: Mapping[str, Tuple[Event, int]], prefix: str) -> Tuple[List[List[str]], List[List[str]], Mapping[str, Tuple[str, bool]], List[List[str]]]:
+    targetstable = [[0] * len(extended_events)]
+    actionstable = [['noop'] * len(extended_events)]
+    stringstable = [['N/A'] * len(extended_events)]
+    actionblocks = {}
+    actionblockid = 1
+    for state in states:
+      targets = []
+      actions = []
+      strings = []
+      for i in range(len(extended_events)):
+        strings.append('N/A')
+      for tag in extended_events.keys():
+        found_target = False
+        found_action = False
+        (_, evtidx) = extended_events[tag]
+        for transition in state.transitions:
+          if transition.guard:
+            event_tag = normalize(str(transition.event.name)) + '_' + normalize(str(transition.guard))
+          else:
+            event_tag = normalize(str(transition.event.name))
+          if tag == event_tag:
+            if transition.target:
+              target = states.index(transition.target) - states.index(state)
+              found_target = True
+            if len(transition.actions) == 0:
+              string = 'N/A'
+              action = 'noop'
+              found_action = True
+            elif len(transition.actions) == 1:
+              if isinstance(transition.actions[0], Call):
+                call = transition.actions[0]
+                if len(call.operands) > 0:
+                  string = '%s(%s)' % (str(call.operator).replace(' ', '-'), ', '.join([str(x) for x in call.operands]))
+                else:
+                  string = str(call.operator).replace(' ', '-')
+                actionblock = ', '.join(['%s %s' % (x.type, str(x.name)) for x in transition.event.parameters]) + '\n' + str(transition.actions[0])
+                if actionblock not in actionblocks:
+                  action = 'actionblock{id}'.format(id = actionblockid)
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
+              elif isinstance(transition.actions[0], Assignment):
+                assignment = transition.actions[0]
+                string = str(assignment)
+                actionblock = str(transition.actions[0])
+                if actionblock not in actionblocks:
+                  action = 'actionblock{id}'.format(id = actionblockid)
+                  actionblocks[actionblock] = (action, False)
+                  actionblockid += 1
+                  found_action = True
+                else:
+                  (action, _) = actionblocks[actionblock]
+                  found_action = True
+              else:
+                string = 'noop'
+                action = 'noop'
+                found_action = True
+            else:
+              tmpstrs = []
+              for act in transition.actions:
+                if isinstance(act, Call):
+                  call = act
+                  if len(call.operands) > 0:
+                    tmpstrs.append('%s(%s)' % (str(call.operator).replace(' ', '-'), ', '.join([str(x) for x in call.operands])))
+                  else:
+                    tmpstrs.append(str(call.operator).replace(' ', '-'))
+                else:
+                  tmpstrs.append(str(act))
+              string = '; '.join(tmpstrs)
+              actionblock = ', '.join(['%s %s' % (x.type, x.name) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+              if actionblock not in actionblocks:
+                action = 'actionblock{id}'.format(id = actionblockid)
+                actionblocks[actionblock] = (action, False)
+                actionblockid += 1
+              else:
+                (action, _) = actionblocks[actionblock]
+              found_action = True
+        if not found_target:
+          target = 0
+        if not found_action:
+          string = 'N/A'
+          action = 'noop'
+        strings[evtidx] = string
+        targets.append(target)
+        actions.append(action)
+      stringstable.append(strings)
+      targetstable.append(targets)
+      actionstable.append(actions)
+    return (targetstable, actionstable, actionblocks, stringstable)
+
+  def _save_state_machine(indent: int, states: List[State], debug: bool, need_action_delegate: bool, need_guard_delegate: bool, need_variable_delegate: bool, prefix: str) -> Tuple[str, str, str]:
+    def _combine_list(a: list, b: list) -> list:
+      return a + b
+
+    returntype = ''
+    (events, extended_events) = _get_event_data(states)
+    extended_eventtags = [x for x in extended_events.keys()]
+    (targetstable, actionstable, actionblocks, actionstringstable) = _get_target_and_action_data(states, extended_events, prefix)
+
+    action_parameter_signatures = _action_parameter_signatures(events)
+    optional_action_parameter_signatures = _optional_action_parameter_signatures(events)
+
+    delegates_in_exec = []
+    if need_action_delegate:
+      delegates_in_exec.append('action_delegate')
+    if need_guard_delegate:
+      delegates_in_exec.append('guard_delegate')
+    if need_variable_delegate:
+      delegates_in_exec.append('variable_delegate')
+
+    actionnames = set()
+    for row in actionstable:
+      for col in row:
+        actionnames.add(col)
+    eventreturntype = 'void'
+    eventimpl = 'fn exec({params}) -> {returntype}\n'.format(params = (', '.join(["StateMachine * fsm", "usize idx", "StateMachineModel mut* mod"] + optional_action_parameter_signatures)), returntype = eventreturntype)
+    eventimpl += ' ' * delta + 'where idx < %d\n' % ((len(states) + 1) * len(extended_eventtags))
+    eventimpl += ''.join(set([' ' * delta + 'where safe(fsm->guard_delegate.%s)\n' % callname for callname in _lift_guard_callnames([transition.guard for transition in reduce(_combine_list, [state.transitions for state in states], [])])]))
+    eventimpl += ''.join(set([' ' * delta + 'where safe(fsm->action_delegate.%s)\n' % callname for callname in _lift_action_callnames(reduce(_combine_list, [transition.actions for transition in reduce(_combine_list, [state.transitions for state in states], [])], []) + reduce(_combine_list, [state.on_enter + state.on_exit for state in states], []))]))
+    eventimpl += ''.join(set([' ' * delta + 'where safe(fsm->variable_delegate.on_%s_changed)\n' % varname for varname in _lift_variable_names(reduce(_combine_list, [transition.actions for transition in reduce(_combine_list, [state.transitions for state in states], [])], []) + reduce(_combine_list, [state.on_enter + state.on_exit for state in states], []))]))
+    eventimpl += '{\n'
+    eventimpl += ' ' * delta + 'int newstate = mod->state + transition_states[idx];\n'
+    eventimpl += ' ' * delta + 'if newstate != mod->state {\n'
+    eventimpl += ' ' * (delta * 2) + 'switch mod->state {\n'
+    casebaseindent = len(' ' * (delta * 2))
+    for (idx, state) in enumerate(states):
+      if len(state.on_exit) == 0:
+        continue
+      eventimpl += ' ' * (casebaseindent + delta) + '{idx} => {{ on_exit_actionblock{idx}(fsm, mod); }}\n'.format(idx = idx + 1)
+    eventimpl += ' ' * (casebaseindent + delta) + 'default => {};\n'
+    eventimpl += ' ' * (casebaseindent) + '}\n'
+    eventimpl += ' ' * (delta * 2) + 'switch transition_actions[idx] {\n'
+    casebaseindent = len(' ' * (delta * 2))
+    for i in range(1, len(actionnames)):
+      eventimpl += ' ' * (casebaseindent + delta) + '{idx} => {{ {action}({args}); }}\n'.format(idx = i, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'mod'] + [x.split(' ')[1] for x in action_parameter_signatures]))
+    eventimpl += ' ' * (casebaseindent + delta) + 'default => {};\n'
+    eventimpl += ' ' * (casebaseindent) + '}\n'
+    eventimpl += ' ' * (delta * 2) + 'switch newstate {\n'
+    casebaseindent = len(' ' * (delta * 2))
+    for (idx, state) in enumerate(states):
+      if len(state.on_enter) == 0:
+        continue
+      eventimpl += ' ' * (casebaseindent + delta) + '{idx} => {{ on_enter_actionblock{idx}(fsm, mod); }}\n'.format(idx = idx + 1)
+    eventimpl += ' ' * (casebaseindent + delta) + 'default => {};\n'
+    eventimpl += ' ' * (casebaseindent) + '}\n'
+    eventimpl += ' ' * (delta * 2) + 'mod->state = newstate\n'
+    eventimpl += ' ' * delta + '} else {\n'
+    eventimpl += ' ' * (delta * 2) + 'switch transition_actions[idx] {\n'
+    casebaseindent = len(' ' * (delta * 2))
+    for i in range(1, len(actionnames)):
+      eventimpl += ' ' * (casebaseindent + delta) + '{idx} => {{ {action}({args}); }}\n'.format(idx = i, action = 'actionblock%d' % i, args = ', '.join(['fsm', 'mod'] + [x.split(' ')[1] for x in action_parameter_signatures]))
+    eventimpl += ' ' * (casebaseindent + delta) + 'default => {};\n'
+    eventimpl += ' ' * (casebaseindent) + '}\n'
+    eventimpl += ' ' * delta + '}\n'
+    eventimpl += '}\n\n'
+
+    for (event, guardmappings) in events.items():
+      parameter_signatures = [_parameter_to_zz_signature(x) for x in event.parameters]
+      eventimpl += 'pub fn {funname}({params}) -> {returntype}\n'.format(funname = _zz_normalize(event.name), params = ', '.join(["StateMachine * fsm", "StateMachineModel mut* mod"] + parameter_signatures), returntype = eventreturntype)
+      eventimpl += ''.join(set([' ' * delta + 'where safe(fsm->guard_delegate.%s)\n' % callname for callname in _lift_guard_callnames([transition.guard for transition in reduce(_combine_list, [state.transitions for state in states], [])])]))
+      eventimpl += ''.join(set([' ' * delta + 'where safe(fsm->action_delegate.%s)\n' % callname for callname in _lift_action_callnames(reduce(_combine_list, [transition.actions for transition in reduce(_combine_list, [state.transitions for state in states], [])], []) + reduce(_combine_list, [state.on_enter + state.on_exit for state in states], []))]))
+      eventimpl += ''.join(set([' ' * delta + 'where safe(fsm->variable_delegate.on_%s_changed)\n' % varname for varname in _lift_variable_names(reduce(_combine_list, [transition.actions for transition in reduce(_combine_list, [state.transitions for state in states], [])], []) + reduce(_combine_list, [state.on_enter + state.on_exit for state in states], []))]))
+      eventimpl += ' ' * delta + 'where %s\n' % ' || '.join(set(['is_in_state(mod, State::%s)' % _state_to_string(state) for state in _lift_current_states(event, states)]))
+      eventimpl += ' ' * delta + 'model %s\n' % ' || '.join(set(['is_in_state(mod, State::%s)' % _state_to_string(state) for state in reduce(_combine_list, [_lift_target_states(event, s) for s in states], [])]))
+      eventimpl += '{\n'
+      guards = [x for x in guardmappings.keys()]
+      args = []
+      for p in action_parameter_signatures:
+        args.append(p.split(' ')[1].strip())
+      if len(guards) == 1 and guards[0] == '':
+        (transition, event_tag) = guardmappings['']
+        attest = ''
+        statepairs = _lift_event_states(transition.event, transition.guard, states)
+        firstline = True
+        for (srcstate, dststate) in statepairs:
+          if srcstate == dststate or srcstate == None or dststate == None:
+            continue
+          attest += ' ' * (delta * 2) + ('} else 'if not firstline else '') + 'if origstate == State::%s {\n' % _state_to_string(srcstate)
+          attest += ' ' * (delta * 3) + 'static_attest(is_in_state(mod, State::%s) == true);\n' % _state_to_string(dststate)
+          firstline = False
+        if firstline == False:
+          attest += ' ' * (delta * 2) + '}\n'
+        eventimpl += ' ' * delta + 'usize idx = (usize)(mod->state * {0}) + {1};\n'.format(len(extended_events), extended_eventtags.index(event_tag))
+        if len(attest) > 0:
+          eventimpl += ' ' * delta + 'int origstate = mod->state;\n'
+        eventimpl += ' ' * delta + 'static_attest(idx < %d);\n' % ((len(states) + 1) * len(extended_eventtags))
+        if debug:
+          #eventimpl += ' ' * delta + 'printf("(" & state_strings[fsm.state] & ", {event}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""))
+          pass
+        eventimpl += ' ' * delta + 'exec({args});\n'.format(args = ', '.join(['fsm', 'idx', 'mod'] + args))
+        eventimpl += attest
+      else:
+        firstline = True
+        for guardstr in guards:
+          if guardstr == '':
+            continue
+          (transition, event_tag) = guardmappings[guardstr]
+          attest = ''
+          statepairs = _lift_event_states(transition.event, transition.guard, states)
+          subfirstline = True
+          for (srcstate, dststate) in statepairs:
+            if srcstate == dststate or srcstate == None or dststate == None:
+              continue
+            attest += ' ' * (delta * 2) + ('} else 'if not subfirstline else '') + 'if origstate == State::%s {\n' % _state_to_string(srcstate)
+            attest += ' ' * (delta * 3) + 'static_attest(is_in_state(mod, State::%s) == true);\n' % _state_to_string(dststate)
+            subfirstline = False
+          if subfirstline == False:
+            attest += ' ' * (delta * 2) + '}\n'
+          guard = transition.guard
+          if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+            eventimpl += ' ' * delta + ('} else ' if not firstline else '') + 'if fsm->guard_delegate.{funname}({args}) {{\n'.format(funname = _zz_normalize(str(guard.expr.entity.operator)), args = ', '.join(['mod'] + [str(x) for x in guard.expr.entity.operands]))
+          elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
+            eventimpl += ' ' * delta + ('} else ' if not firstline else '') + 'if fsm->guard_delegate.{funname}({args}) {{\n'.format(funname = _zz_normalize(str(guard.expr.entity)), args = 'mod')
+          else:
+            eventimpl += ' ' * delta + ('} else ' if not firstline else '') + 'if {cond} {{\n'.format(cond = str(guard))
+          eventimpl += ' ' * (delta * 2) + 'usize idx = (usize)(mod->state * {0}) + {1};\n'.format(len(extended_events), extended_eventtags.index(event_tag))
+          if len(attest) > 0:
+            eventimpl += ' ' * (delta * 2) + 'int origstate = mod->state;\n'
+          eventimpl += ' ' * (delta * 2) + 'static_attest(idx < %d);\n' % ((len(states) + 1) * len(extended_eventtags))
+          if debug:
+            #eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {event}[{guard}]) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""), guard = guardstr.replace('\\', '\\\\').replace('"', '\\"'))
+            pass
+          eventimpl += ' ' * (delta * 2) + 'exec({args});\n'.format(args = ', '.join(['fsm', 'idx', 'mod'] + args))
+          eventimpl += attest
+          firstline = False
+        if '' in guards:
+          (transition, event_tag) = guardmappings['']
+          attest = ''
+          statepairs = _lift_event_states(transition.event, transition.guard, states)
+          subfirstline = True
+          for (srcstate, dststate) in statepairs:
+            if srcstate == dststate or srcstate == None or dststate == None:
+              continue
+            attest += ' ' * (delta * 2) + ('} else 'if not subfirstline else '') + 'if origstate == State::%s {\n' % _state_to_string(srcstate)
+            attest += ' ' * (delta * 3) + 'static_attest(is_in_state(mod, State::%s) == true);\n' % _state_to_string(dststate)
+            subfirstline = False
+          if subfirstline == False:
+            attest += ' ' * (delta * 2) + '}\n'
+          eventimpl += ' ' * delta + '} else {\n'
+          event_tag = normalize(event.name)
+          eventimpl += ' ' * (delta * 2) + 'usize idx = (usize)(mod->state * {0}) + {1};\n'.format(len(extended_events), extended_eventtags.index(event_tag))
+          if len(attest) > 0:
+            eventimpl += ' ' * (delta * 2) + 'int origstate = mod->state;\n'
+          eventimpl += ' ' * (delta * 2) + 'static_attest(idx < %d);\n' % ((len(states) + 1) * len(extended_eventtags))
+          if debug:
+            # eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[fsm.state] & ", {event}) => (" & state_strings[fsm.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""))
+            pass
+          eventimpl += ' ' * (delta * 2) + 'exec({args});\n'.format(args = ', '.join(['fsm', 'idx', 'mod'] + args))
+          eventimpl += attest
+          eventimpl += ' ' * delta + '}\n'
+        else:
+          eventimpl += ' ' * delta + '}\n'
+      eventimpl += '}\n\n'
+
+    actionimpl = _generate_state_on_enter_actions(states, prefix)
+    actionimpl += _generate_state_on_exit_actions(states, prefix)
+    actionimpl += _generate_actions(states, optional_action_parameter_signatures, actionblocks, prefix)
+
+    typedecl = 'pub struct StateMachine {\n'
+    constructor_arguments = []
+    if need_action_delegate:
+      typedecl += ' ' * (indent + delta) + 'ActionDelegate action_delegate;\n'
+    if need_guard_delegate:
+      typedecl += ' ' * (indent + delta) + 'GuardDelegate guard_delegate;\n'
+    if need_variable_delegate:
+      typedecl += ' ' * (indent + delta) + 'VariableDelegate variable_delegate;\n'
+    typedecl += '}\n\n'
+
+    tabledecl = 'static int transition_states[{arraylen}] = {{\n{padding}{body}\n}};\n\n'.format(arraylen = '%d' % ((len(states) + 1) * len(extended_eventtags)), body = (',\n' + ' ' * delta).join([', '.join([str(y) for y in x]) for x in targetstable]), padding = ' ' * (delta))
+    tabledecl += 'static int transition_actions[{arraylen}] = {{\n{padding}{body}\n}};\n\n'.format(arraylen= '%d' % ((len(states) + 1) * len(extended_eventtags)), body = (',\n' + ' ' * delta).join([', '.join(['0' if y == 'noop' else y[len('actionblock'):] for y in x]) for x in actionstable]), padding = ' ' * (delta))
+    if debug:
+      #state_strings = ['"N/A"'] + ['"{0}"'.format(str(x.name).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')) for x in states]
+      #tabledecl += 'const state_strings: array[{arrayrange}, string] = [{body}]\n'.format(arrayrange = '0..%d' % len(states), body = ", ".join(state_strings))
+      #tabledecl += 'const action_strings: array[{arrayrange}, string] = [\n            {body}\n        ]\n'.format(arrayrange = '0..%d' % ((len(states) + 1) * len(extended_eventtags) - 1), body = ',\n            '.join([', '.join(['"{0}"'.format(str(y).replace('"', '\\"')) for y in x]) for x in actionstringstable]))
+      pass
+    return (typedecl, tabledecl, actionimpl + eventimpl)
+#+end_src
+*** utility
+**** framework
+#+begin_src python :noweb-ref utility
+  _zz_builtin_types = ['int', 'int8', 'int16', 'int32', 'int64', 'i8', 'i16', 'i32', 'i64', 'uint', 'uint8', 'uint16', 'uint32', 'uint64', 'u8', 'u16', 'u32', 'u64', 'float', 'float32', 'float64', 'true', 'false', 'char', 'string', 'cstring']
+
+  <<normalize>>
+
+  <<to-zz-type>>
+
+  <<signature>>
+
+  <<get-used-parameters>>
+
+  <<lift-arguments>>
+
+  <<lifts>>
+
+  <<generate-actions>>
+
+  <<generate-state-actions>>
+#+end_src
+**** normalize
+#+begin_src python :noweb-ref normalize
+  def _zz_normalize(string: str) -> str:
+    keywords = [ "export"
+               , "pub"
+               , "const"
+               , "packed"
+               , "mutable"
+               , "mut"
+               , "for"
+               , "while"
+               , "if"
+               , "else"
+               , "return"
+               , "continue"
+               , "is"
+               , "switch"
+               , "break"
+               , "default"
+               , "unsafe"
+               , "inline"
+               , "where"
+               , "model"
+               , "struct"
+               , "union"
+               ]
+    string = string.strip()
+    if string.startswith('"') and string.endswith('"'):
+      string = string[1:-1]
+    if string == '-':
+      string = 'minus'
+    elif string == '_':
+      string = 'underline'
+    elif string.startswith('-'):
+      string = string.replace('-', 'minus', 1)
+    result = normalize(string.replace('-', ' ').replace('_', ' ')).lower()
+    if result in keywords:
+      return 'zz_' + result
+    elif result in _zz_builtin_types:
+      return 'zz_' + result
+    else:
+      return result
+#+end_src
+**** to zz type
+#+begin_src python :noweb-ref to-zz-type
+  def _to_zz_primitive_type(origin_type: str) -> str:
+    types = {
+      "bool": "bool",
+      "char": "char",
+      "short": "i16",
+      "ushort": "u16",
+      "int": "i32",
+      "uint": "u32",
+      "long": "i64",
+      "ulong": "u64",
+      "float": "double",
+      "number": "int",
+      "string": "char *",
+    }
+    if origin_type in types:
+      return types[origin_type]
+    else:
+      return origin_type
+
+  def _to_zz_type(origin_type: type) -> str:
+    if 'kind' in dir(origin_type):
+      if origin_type.kind == 1:
+        subtypes = []
+        for subtype in origin_type.types:
+          subtypes.append(str(subtype.type) if str(subtype.type) in _zz_builtin_types else _to_zz_primitive_type(str(subtype.type)))
+        return "_".join([x.capitalize() for x in subtypes])
+      elif origin_type.kind == 2:
+        subtype = str(origin_type.type) if str(origin_type.type) in _zz_builtin_types else _to_zz_primitive_type(str(origin_type.type))
+        return '%s * ' % subtype
+      elif origin_type.kind == 3:
+        keytype = str(origin_type.keytype) if str(origin_type.keytype) in _zz_builtin_types else _to_zz_primitive_type(str(origin_type.keytype))
+        valtype = str(origin_type.valtype) if str(origin_type.valtype) in _zz_builtin_types else _to_zz_primitive_type(str(origin_type.valtype))
+        return 'Table+tt'
+      else:
+        return _to_zz_primitive_type(str(origin_type))
+    else:
+      return _to_zz_primitive_type(str(origin_type))
+#+end_src
+**** signature
+#+begin_src python :noweb-ref signature
+  def _parameter_to_zz_signature(p: Parameter) -> str:
+    return '%s %s' % (_to_zz_type(p.type), p.name)
+
+  def _action_parameter_signatures(events: List[Event]) -> List[str]:
+    parameters = {}
+    for evt in events:
+      for param in evt.parameters:
+        parameters[_parameter_to_zz_signature(param)] = param
+    return [_parameter_to_zz_signature(x) for x in parameters.values()]
+
+  def _optional_action_parameter_signatures(events: List[Event]) -> List[str]:
+    parameters = {}
+    for evt in events:
+      for param in evt.parameters:
+        parameters[_parameter_to_zz_signature(param)] = param
+    return [_parameter_to_zz_signature(x) for x in parameters.values()]
+#+end_src
+**** used parameter
+#+begin_src python :noweb-ref get-used-parameters
+  def _get_used_parameters(transition: Transition) -> List[Parameter]:
+    params = {}
+    for action in transition.actions:
+      if isinstance(action, Call):
+        for arg in action.operands:
+          if isinstance(arg, Identifier):
+            for param in transition.event.parameters:
+              if str(arg) == str(param.name):
+                params[str(arg)] = param
+      elif isinstance(action, Assignment):
+        if isinstance(action.expression, Call):
+          for arg in action.expression.operands:
+            if isinstance(arg, Identifier):
+              for param in transition.event.parameters:
+                if str(arg) == str(param.name):
+                  params[str(arg)] = param
+    return [x for x in params.values()]
+#+end_src
+**** lift arguments
+#+begin_src python :noweb-ref lift-arguments
+  def _generate_action_body(indent: int, actions: List[Union[Assignment, Call]], renamed_args: Mapping[str, str], prefix: str) -> str:
+    code = ''
+    idx = 0
+    varidx = 0
+    for action in actions:
+      if isinstance(action, Call):
+        used_args = []
+        keys = renamed_args.keys()
+        for operand in action.operands:
+          if isinstance(operand, Literal):
+            used_args.append(str(operand))
+          elif str(operand.name) in keys:
+            used_args.append(renamed_args[str(operand.name)])
+        code += ' ' * indent + 'fsm->action_delegate.{funname}({args});\n'.format(funname = _zz_normalize(str(action.operator)), args = ', '.join(['mod'] + used_args))
+      elif isinstance(action, Assignment):
+        vartype = _to_zz_type(action.type) if action.type != None else 'int'
+        if isinstance(action.expression, Identifier):
+          code += ' ' * indent + '{vartype} var{varidx} = {arg};\n'.format(vartype = vartype, funname = _zz_normalize(str(action.expression)), varidx = varidx, arg = str(action.expression.name))
+          code += ' ' * indent + 'fsm->variable_delegate.on_{varname}_changed(mod, var{varidx});\n'.format(varname = str(action.target).lower(), varidx = varidx)
+          varidx += 1
+        elif isinstance(action.expression, Call):
+          call = action.expression
+          used_args = []
+          keys = renamed_args.keys()
+          for operand in call.operands:
+            if isinstance(operand, Literal):
+              used_args.append(str(operand))
+            elif str(operand.name) in keys:
+              used_args.append(renamed_args[str(operand.name)])
+          code += ' ' * indent + '{vartype} var{varidx} = fsm->action_delegate.{funname}({args});\n'.format(vartype = vartype, varidx = varidx, funname = _zz_normalize(str(call.operator)), args = ', '.join(['mod'] + used_args))
+          code += ' ' * indent + 'fsm->variable_delegate.on_{varname}_changed(mod, var{varidx});\n'.format(varname = str(action.target).lower(), varidx = varidx)
+          varidx += 1
+        else:
+          code += ' ' * indent + '{vartype} var{varidx} = {arg};\n'.format(vartype = vartype, varidx = varidx, arg = str(action.expression))
+          code += ' ' * indent + 'fsm->variable_delegate.on_{varname}_changed(mod, var{varidx});\n'.format(varname = str(action.target).lower(), varidx = varidx)
+          varidx += 1
+      idx += 1
+    code += ' ' * indent + 'return mod;\n'
+    return code
+
+  def _generate_recursive_lifting_arguments(indent: int, used_params: List[Parameter], renamed_args: Mapping[str, str], actions: List[Union[Assignment, Call]], prefix: str) -> str:
+    code = ''
+    if len(used_params) == 0:
+      return _generate_action_body(indent, actions, renamed_args, prefix)
+    else:
+      for param in used_params:
+        renamed_args[str(param.name)] = str(param.name)
+      return _generate_action_body(indent, actions, renamed_args, prefix)
+#+end_src
+**** lifts
+#+begin_src python :noweb-ref lifts
+  def _lift_action_callnames(actions: List[Union[Assignment, Call]]) -> List[str]:
+    result = []
+    for action in actions:
+      if isinstance(action, Call):
+        result.append(_zz_normalize(str(action.operator)))
+      elif isinstance(action, Assignment) and isinstance(action.expression, Call):
+        result.append(_zz_normalize(str(action.expression.operator)))
+    return result
+
+  def _lift_variable_names(actions: List[Union[Assignment, Call]]) -> List[str]:
+    result = []
+    for action in actions:
+      if isinstance(action, Assignment):
+        result.append(_zz_normalize(str(action.target.name).lower()))
+    return result
+
+  def _lift_guard_callnames(guards: List[BoolExpression]) -> List[str]:
+    result = []
+    for guard in guards:
+      if guard == None or guard.expr == None:
+        continue
+      if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+        result.append(_zz_normalize(str(guard.expr.entity.operator)))
+      elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
+        result.append(_zz_normalize(str(guard.expr.entity)))
+    return result
+
+  def _lift_current_states(event: Event, states: List[State]) -> List[State]:
+    result = []
+    for state in states:
+      for transition in state.transitions:
+        if transition.event.name == event.name:
+          result.append(state)
+    return result
+
+  def _lift_target_states(event: Event, state: State) -> List[State]:
+    result = []
+    for transition in state.transitions:
+      if transition.target and transition.event.name == event.name:
+        result.append(transition.target)
+    return result
+
+  def _lift_transition_states(transition: Transition, states: List[State]) -> Tuple[State, State]:
+    for state in states:
+      for tran in state.transitions:
+        if tran == transition:
+          return (state, tran.target)
+    return (None, None)
+
+  def _lift_event_states(event: Event, guard: BoolExpression, states: List[State]) -> List[Tuple[State, State]]:
+    result = []
+    for state in states:
+      for transition in state.transitions:
+        if transition.event == event and transition.guard == guard:
+          result.append((state, transition.target))
+    return result
+#+end_src
+**** generate actions
+#+begin_src python :noweb-ref generate-actions
+  def _generate_actions(states: List[State], optional_action_parameter_signatures: List[str], actionblocks: Mapping[str, Tuple[str, bool]], prefix: str) -> str:
+    returntype = 'StateMachineModel *'
+    actionimpl = ''
+    for state in states:
+      for transition in state.transitions:
+        if len(transition.actions) == 0:
+          continue
+        elif len(transition.actions) == 1:
+          if isinstance(transition.actions[0], Call):
+            actionblock = ', '.join(['%s %s' % (x.type, x.name) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+          elif isinstance(transition.actions[0], Assignment):
+            actionblock = str(transition.actions[0])
+          else:
+            continue
+        else:
+          actionblock = ', '.join(['%s %s' % (x.type, x.name) for x in transition.event.parameters]) + '\n' + '\n'.join([str(x) for x in transition.actions])
+        (action, generated) = actionblocks[actionblock]
+        if generated:
+          continue
+        actionfun = action
+        actionblocks[actionblock] = (action, True)
+
+        actionimpl += 'fn {funname}({args}) -> {returntype}\n'.format(funname = actionfun, args = ', '.join(["StateMachine * fsm", "StateMachineModel mut* mod"] + optional_action_parameter_signatures), returntype = returntype)
+        actionimpl += ''.join([' ' * delta + 'where safe(fsm->action_delegate.%s)\n' % callname for callname in _lift_action_callnames(transition.actions)])
+        actionimpl += ''.join([' ' * delta + 'where safe(fsm->variable_delegate.on_%s_changed)\n' % varname for varname in _lift_variable_names(transition.actions)])
+        actionimpl += '{\n'
+        used_params = _get_used_parameters(transition)
+        actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, transition.actions, prefix)
+        actionimpl += '}\n\n'
+    return actionimpl
+#+end_src
+**** generate state actions
+#+begin_src python :noweb-ref generate-state-actions
+  def _generate_state_on_enter_actions(states: List[State], prefix: str) -> str:
+    returntype = 'StateMachineModel *'
+    actionimpl = ''
+    for idx, state in enumerate(states):
+      if len(state.on_enter) == 0:
+        continue
+
+      actionimpl += 'fn on_enter_actionblock{idx}({args}) -> {returntype}\n'.format(idx = idx + 1, args = ', '.join(["StateMachine * fsm", "StateMachineModel mut* mod"]), returntype = returntype)
+      actionimpl += ''.join([' ' * delta + 'where safe(fsm->action_delegate.%s)\n' % callname for callname in _lift_action_callnames(state.on_enter)])
+      actionimpl += ''.join([' ' * delta + 'where safe(fsm->variable_delegate.on_%s_changed)\n' % varname for varname in _lift_variable_names(state.on_enter)])
+      actionimpl += '{\n'
+      used_params = []
+      actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, state.on_enter, prefix)
+      actionimpl += '}\n\n'
+    return actionimpl
+
+  def _generate_state_on_exit_actions(states: List[State], prefix: str) -> str:
+    returntype = 'StateMachineModel *'
+    actionimpl = ''
+    for idx, state in enumerate(states):
+      if len(state.on_exit) == 0:
+        continue
+
+      actionimpl += 'fn on_exit_actionblock{idx}({args}) -> {returntype}\n'.format(idx = idx + 1, args = ', '.join(["StateMachine * fsm", "StateMachineModel mut* mod"]), returntype = returntype)
+      actionimpl += ''.join([' ' * delta + 'where safe(fsm->action_delegate.%s)\n' % callname for callname in _lift_action_callnames(state.on_exit)])
+      actionimpl += ''.join([' ' * delta + 'where safe(fsm->variable_delegate.on_%s_changed)\n' % varname for varname in _lift_variable_names(state.on_exit)])
+      actionimpl += '{\n'
+      used_params = []
+      actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, state.on_exit, prefix)
+      actionimpl += '}\n\n'
+    return actionimpl
+#+end_src
