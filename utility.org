@@ -2,7 +2,12 @@
 * Utility
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/utility.py
+  from typing import List, Mapping, Tuple, Union
+  from model import Event, Parameter, State, Transition, Variable
+  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
+
   <<normalize>>
+  <<lifts>>
 #+end_src
 ** normalize
 #+begin_src python :noweb-ref normalize
@@ -54,5 +59,70 @@
       result = result[:-1]
     if len(result) > 0 and result[0].isdigit():
       result = "NUMBER_" + result
+    return result
+#+end_src
+** lifts
+#+begin_src python :noweb-ref lifts
+  def lift_action_callnames(actions: List[Union[Assignment, Call]], normalizer = None) -> List[str]:
+    result = []
+    for action in actions:
+      if isinstance(action, Call):
+        result.append(str(action.operator))
+      elif isinstance(action, Assignment) and isinstance(action.expression, Call):
+        result.append(str(action.expression.operator))
+    return [normalizer(x) for x in result] if normalizer != None else result
+
+  def lift_variable_names(actions: List[Union[Assignment, Call]], normalizer = None) -> List[str]:
+    result = []
+    for action in actions:
+      if isinstance(action, Assignment):
+        result.append(str(action.target.name).lower())
+    return [normalizer(x) for x in result] if normalizer != None else result
+
+  def lift_guard_callnames(guards: List[BoolExpression], normalizer = None) -> List[str]:
+    result = []
+    for guard in guards:
+      if guard == None or guard.expr == None:
+        continue
+      if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+        result.append(str(guard.expr.entity.operator))
+      elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
+        result.append(str(guard.expr.entity))
+    return [normalizer(x) for x in result] if normalizer != None else result
+
+  def lift_current_states(event: Event, states: List[State]) -> List[State]:
+    result = []
+    for state in states:
+      for transition in state.transitions:
+        if transition == None:
+          continue
+        if transition.event.name == event.name:
+          result.append(state)
+    return result
+
+  def lift_target_states(event: Event, state: State) -> List[State]:
+    result = []
+    for transition in state.transitions:
+      if transition == None:
+        continue
+      if transition.event.name == event.name:
+        result.append(transition.target if transition.target != None else state)
+    return result
+
+  def lift_transition_states(transition: Transition, states: List[State]) -> Tuple[State, State]:
+    for state in states:
+      for tran in state.transitions:
+        if tran == transition:
+          return (state, tran.target)
+    return (None, None)
+
+  def lift_event_states(event: Event, guard: BoolExpression, states: List[State]) -> List[Tuple[State, State]]:
+    result = []
+    for state in states:
+      for transition in state.transitions:
+        if transition == None:
+          continue
+        if transition.event == event and transition.guard == guard:
+          result.append((state, transition.target))
     return result
 #+end_src

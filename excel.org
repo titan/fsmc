@@ -157,11 +157,12 @@
             transition._targetstr = '\n'.join(transition._targetstrs)
           state.transitions.append(transition)
         else:
-          state.transitions.append(transition)
+          state.transitions.append(None)
       states.append(state)
     for state in states:
       for t in state.transitions:
-        _verify_transition(t, states)
+        if t:
+          _verify_transition(t, states)
     return ([x for x in variables.values()], states)
 #+end_src
 **** verify transition
