@@ -213,6 +213,8 @@
     idx = 0
     for state in states:
       for transition in state.transitions:
+        if transition == None:
+          continue
         event = transition.event
         key = str(event) + str(transition.guard)
         if key not in pairs:
@@ -227,6 +229,8 @@
       for (_, event, guard) in headers:
         found = False
         for transition in state.transitions:
+          if transition == None:
+            continue
           if event == transition.event and (str(guard) == str(transition.guard)):
             row.append((transition.target if transition.target != state else None, transition.actions))
             found = True
