@@ -4,9 +4,9 @@
 #+begin_src python :tangle ${BUILDDIR}/nim.py
   from typing import List, Mapping, Tuple, Union
   from model import Event, Parameter, State, Transition, Variable
-  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
+  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression, BinaryBoolExpression, UnaryBoolExpression
   from analyzer import find_call_in_expression
-  from utility import normalize
+  from utility import normalize, lift_guard_call
 
   delta = 2 # indent
 
@@ -146,12 +146,7 @@
           continue
         guard = transition.guard
         if guard:
-          if isinstance(guard.expr, BoolExpression):
-            continue
-          if isinstance(guard.expr, CompareExpression):
-            continue
-          if isinstance(guard.expr, Expression) and (isinstance(guard.expr.entity, Call) or isinstance(guard.expr.entity, Identifier)):
-            call = guard.expr.entity
+          for call in lift_guard_call(guard, transition.event):
             calls[str(call)] = (transition.event, call)
     code = ''
     for (event, call) in calls.values():
@@ -414,12 +409,13 @@
             continue
           (transition, event_tag) = guardmappings[guardstr]
           guard = transition.guard
-          if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
-            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity.operator)), args = ', '.join(['model'] + [str(x) for x in guard.expr.entity.operands]))
-          elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
-            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity)), args = 'model')
-          else:
-            eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = str(guard))
+          eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if %s:\n' % _generate_guard(event, guard, prefix = "fsm.guard_delegate.")
+          #if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
+          #  eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity.operator)), args = ', '.join(['model'] + [str(x) for x in guard.expr.entity.operands]))
+          #elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
+          #  eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if fsm.guard_delegate.{funname}({args}):\n'.format(funname = _nim_normalize(str(guard.expr.entity)), args = 'model')
+          #else:
+          #  eventimpl += ' ' * delta + ('el' if not firstline else '') + 'if {cond}:\n'.format(cond = str(guard))
           eventimpl += ' ' * (delta * 2) + 'let idx = (model.state * {0}) + {1}\n'.format(len(extended_events), extended_eventtags.index(event_tag))
           if debug:
             eventimpl += ' ' * (delta * 2) + 'echo("(" & state_strings[model.state] & ", {event}[{guard}]) => (" & state_strings[model.state + transition_states[idx]] & ", " & action_strings[idx] & ")")\n'.format(event = str(event).replace('\\', '\\\\').replace('"', '\\"').replace("()", ""), guard = guardstr.replace('\\', '\\\\').replace('"', '\\"'))
@@ -491,6 +487,8 @@
   <<generate-actions>>
 
   <<generate-state-actions>>
+
+  <<generate-guard>>
 #+end_src
 **** normalize
 #+begin_src python :noweb-ref normalize
@@ -707,4 +705,28 @@
       actionimpl += _generate_recursive_lifting_arguments(delta, used_params, {}, state.on_exit, prefix, asynced)
       actionimpl += '\n'
     return actionimpl
+#+end_src
+**** generate guard
+#+begin_src python :noweb-ref generate-guard
+  def _generate_guard(event: Event, expr: Expression, prefix: str = "") -> str:
+    if isinstance(expr, Expression):
+      if isinstance(expr, CompareExpression):
+        return _generate_guard(event, expr.left, prefix = prefix) + " " + str(expr.op) + " " + _generate_guard(event, expr.right, prefix = prefix)
+      elif isinstance(expr, BinaryBoolExpression):
+        return _generate_guard(event, expr.left, prefix = prefix) + " " + str(expr.op) + " " + _generate_guard(event, expr.right, prefix = prefix)
+      elif isinstance(expr, UnaryBoolExpression):
+        return str(expr.op) + " " + _generate_guard(expr.expr, prefix = prefix)
+      elif isinstance(expr, BoolExpression):
+        return _generate_guard(event, expr.expr, prefix = prefix)
+      elif isinstance(expr.entity, Call):
+        return prefix + str(expr.entity.operator) + '(model, %s)' % ','.join([str(x) for x in expr.entity.operands])
+      elif isinstance(expr.entity, Identifier):
+        if str(expr.entity) in [str(x.name) for x in event.parameters]:
+          return str(expr)
+        else:
+          return prefix + str(expr.entity) + '(model)'
+      else:
+        return str(expr)
+    else:
+      return str(expr)
 #+end_src

@@ -2,9 +2,9 @@
 * Utility
 ** framework
 #+begin_src python :tangle ${BUILDDIR}/utility.py
-  from typing import List, Mapping, Tuple, Union
+  from typing import List, Mapping, Set, Tuple, Union
   from model import Event, Parameter, State, Transition, Variable
-  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression
+  from semantic import Assignment, Call, Identifier, Literal, CompareExpression, Expression, BoolExpression, BinaryBoolExpression, UnaryBoolExpression
 
   <<normalize>>
   <<lifts>>
@@ -79,15 +79,34 @@
         result.append(str(action.target.name).lower())
     return [normalizer(x) for x in result] if normalizer != None else result
 
-  def lift_guard_callnames(guards: List[BoolExpression], normalizer = None) -> List[str]:
-    result = []
-    for guard in guards:
-      if guard == None or guard.expr == None:
-        continue
-      if isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Call):
-        result.append(str(guard.expr.entity.operator))
-      elif isinstance(guard.expr, Expression) and (not isinstance(guard.expr, CompareExpression)) and (not isinstance(guard.expr, BoolExpression)) and isinstance(guard.expr.entity, Identifier):
-        result.append(str(guard.expr.entity))
+  def lift_guard_call(expr: Expression, event: Event) -> Set[Union[Call, Identifier]]:
+    if isinstance(expr, Expression):
+      if isinstance(expr, CompareExpression):
+        return lift_guard_call(expr.left, event) or lift_guard_call(expr.right, event)
+      elif isinstance(expr, BinaryBoolExpression):
+        return lift_guard_call(expr.left, event) or lift_guard_call(expr.right, event)
+      elif isinstance(expr, UnaryBoolExpression):
+        return lift_guard_call(expr.expr, event)
+      elif isinstance(expr, BoolExpression):
+        return lift_guard_call(expr.expr, event)
+      elif isinstance(expr.entity, Call):
+        result = set()
+        result.add(expr.entity)
+        return result
+      elif isinstance(expr.entity, Identifier):
+        if str(expr.entity) in [str(x.name) for x in event.parameters]:
+          return set()
+        else:
+          result = set()
+          result.add(expr.entity)
+          return result
+      else:
+        return set()
+    else:
+      return set()
+
+  def lift_guard_callnames(guard: BoolExpression, event: Event, normalizer = None) -> List[str]:
+    result = [x for x in lift_guard_call(guard, event)]
     return [normalizer(x) for x in result] if normalizer != None else result
 
   def lift_current_states(event: Event, states: List[State]) -> List[State]:

@@ -43,7 +43,10 @@
     def identifier(self, id):
       self._consume_queue()
       self._ctx.input = id
-      self._fsm.identifier(self._ctx)
+      if str(id) in ["and", "or", "not"]:
+        self._fsm.literal_token(self._ctx, str(id))
+      else:
+        self._fsm.identifier(self._ctx)
       self._consume_queue()
 
     def literal(self, l):
@@ -124,7 +127,10 @@
       elif isinstance(n, str) and n == '$$':
         self._fsm.dollar_dollar(self._ctx)
       elif isinstance(n, Identifier):
-        self._fsm.identifier(self._ctx)
+        if str(n) in ["and", "or", "not"]:
+          self._fsm.literal_token(self._ctx, str(n))
+        else:
+          self._fsm.identifier(self._ctx)
       elif isinstance(n, Delimiter):
         self._fsm.literal_token(self._ctx, str(n))
       elif isinstance(n, Literal):
