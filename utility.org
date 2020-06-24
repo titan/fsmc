@@ -82,9 +82,13 @@
   def lift_guard_call(expr: Expression, event: Event) -> Set[Union[Call, Identifier]]:
     if isinstance(expr, Expression):
       if isinstance(expr, CompareExpression):
-        return lift_guard_call(expr.left, event) or lift_guard_call(expr.right, event)
+        left = lift_guard_call(expr.left, event)
+        right = lift_guard_call(expr.right, event)
+        return left.union(right)
       elif isinstance(expr, BinaryBoolExpression):
-        return lift_guard_call(expr.left, event) or lift_guard_call(expr.right, event)
+        left = lift_guard_call(expr.left, event)
+        right = lift_guard_call(expr.right, event)
+        return left.union(right)
       elif isinstance(expr, UnaryBoolExpression):
         return lift_guard_call(expr.expr, event)
       elif isinstance(expr, BoolExpression):
