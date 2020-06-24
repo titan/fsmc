@@ -43,6 +43,8 @@
     code = '[*] --> state0\n'
     for state in states:
       for transition in state.transitions:
+        if transition is None:
+          continue
         if transition.target:
           code += 'state{0} --> state{1} : {2}{3}\n'.format(mapping[state], mapping[transition.target], transition.event.name, "[%s]" % transition.guard if transition.guard else "")
         elif len(transition.actions) > 0:
